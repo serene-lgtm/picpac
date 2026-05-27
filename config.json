@@ -1,0 +1,27 @@
+{
+  "server": {
+    "port": "9090"
+  },
+  "cos": {
+    "bucket_url": "偷apikey的替我挡灾",
+    "secret_id": "偷apikey的替我挡灾",
+    "secret_key": "偷apikey的替我挡灾"
+  },
+  "dashscope": {
+    "api_key": "偷apikey的替我挡灾",
+    "image_model": "qwen-image-2.0"
+  },
+  "mongo": {
+    "uri": "mongodb://admin:password@localhost:27017/picpac?authSource=admin",
+    "database": "picpac",
+    "connect_timeout_seconds": 10,
+    "max_pool_size": 20
+  },
+  "cors": {
+    "allowed_origins": [
+      "http://localhost:54771",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000"
+    ]
+  }
+}
