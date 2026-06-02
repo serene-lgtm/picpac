@@ -195,6 +195,214 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `404`: item 不存在
 - `500`: 删除 item 失败
 
+### Create Pack
+
+`POST /api/v1/pack`
+
+用途：
+- 创建一个用户的 pack，用于规划一次打包清单
+- `user_id` 当前阶段可选；用户系统接入后会恢复为必填或从登录态获取
+- `items` 当前只校验 ID 格式，不校验 item 是否属于当前用户；用户系统接入后会补充权限校验
+- 新创建的 pack 会默认写入 `created` 状态
+
+请求类型：
+- `application/json`
+
+请求字段：
+- `name`: string，必填
+- `user_id`: string，可选。用户系统接入后会恢复为必填或从登录态获取
+- `description`: string，可选
+- `items`: string array，可选，item id 列表
+
+请求示例：
+
+```json
+{
+  "name": "日本出差",
+  "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "description": "东京 5 天商务行程",
+  "items": [
+    "6821c0c1f1b2f4d5a6b7c8d9"
+  ]
+}
+```
+
+成功响应：
+
+```json
+{
+  "id": "6821c0c1f1b2f4d5a6b7c8e0",
+  "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "name": "日本出差",
+  "description": "东京 5 天商务行程",
+  "items": [
+    "6821c0c1f1b2f4d5a6b7c8d9"
+  ],
+  "status": "created"
+}
+```
+
+失败响应：
+- `400`: 缺少 `name`，`user_id` 非法，或 `items` 中存在非法 item id
+- `500`: 创建 pack 失败
+
+### List Packs
+
+`GET /api/v1/pack`
+
+用途：
+- 查询 pack 列表
+- 当前阶段 `user_id` 可选；不传时返回全部未删除 pack
+- `status` 是内部状态，不支持作为 query 参数过滤
+- 默认按创建时间倒序返回
+- 已逻辑删除的 pack 不会出现在列表中
+
+请求参数：
+- `user_id`: string，可选，放在 query string 中。用户系统接入后会恢复为必填或从登录态获取
+
+成功响应：
+
+```json
+{
+  "packs": [
+    {
+      "id": "6821c0c1f1b2f4d5a6b7c8e0",
+      "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+      "name": "日本出差",
+      "description": "东京 5 天商务行程",
+      "items": [
+        "6821c0c1f1b2f4d5a6b7c8d9"
+      ],
+      "status": "created"
+    }
+  ]
+}
+```
+
+空列表响应：
+
+```json
+{
+  "packs": []
+}
+```
+
+失败响应：
+- `400`: `user_id` 不是合法 ObjectID
+- `500`: 查询 pack 列表失败
+
+### Get Pack
+
+`GET /api/v1/pack/:pack_id`
+
+用途：
+- 根据 `pack_id` 读取单个 pack 详情
+- 如果 pack 已被逻辑删除，则按不存在处理
+- `status` 是内部状态，不支持作为 query 参数过滤
+
+路径参数：
+- `pack_id`: string，必填，pack 主键
+
+成功响应：
+
+```json
+{
+  "id": "6821c0c1f1b2f4d5a6b7c8e0",
+  "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "name": "日本出差",
+  "description": "东京 5 天商务行程",
+  "items": [
+    "6821c0c1f1b2f4d5a6b7c8d9"
+  ],
+  "status": "created"
+}
+```
+
+失败响应：
+- `400`: 缺少 `pack_id`，或 `pack_id` 不是合法 ObjectID
+- `404`: pack 不存在
+- `500`: 查询 pack 失败
+
+### Update Pack
+
+`PUT /api/v1/pack/:pack_id`
+
+用途：
+- 更新单个 pack 的完整可编辑字段
+- 前端提交更新后的 `name`、`description`、`items`
+- `name` 必填
+- `description` 传空字符串表示清空描述
+- `items` 传空数组表示清空 pack 内 item 列表
+- 后端会保留 `id`、`user_id`、`status`、`created_at` 等系统字段，并更新 `updated_at`
+- 如果 pack 已被逻辑删除，则不允许更新
+
+请求类型：
+- `application/json`
+
+路径参数：
+- `pack_id`: string，必填，pack 主键
+
+请求字段：
+- `name`: string，必填
+- `description`: string，可选
+- `items`: string array，可选，表示更新后的完整 item id 列表
+
+请求示例：
+
+```json
+{
+  "name": "日本出差升级版",
+  "description": "东京 6 天商务行程",
+  "items": [
+    "6821c0c1f1b2f4d5a6b7c8d9"
+  ]
+}
+```
+
+成功响应：
+
+```json
+{
+  "id": "6821c0c1f1b2f4d5a6b7c8e0",
+  "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "name": "日本出差升级版",
+  "description": "东京 6 天商务行程",
+  "items": [
+    "6821c0c1f1b2f4d5a6b7c8d9"
+  ],
+  "status": "created"
+}
+```
+
+失败响应：
+- `400`: 缺少 `name`，`pack_id` 非法，或 `items` 中存在非法 item id
+- `404`: pack 不存在
+- `500`: 更新 pack 失败
+
+### Delete Pack
+
+`DELETE /api/v1/pack/:pack_id`
+
+用途：
+- 逻辑删除单个 pack
+- 删除后会把 `status` 置为 `deleted`，不会真的从 MongoDB 中移除
+
+路径参数：
+- `pack_id`: string，必填，pack 主键
+
+成功响应：
+
+```json
+{
+  "deleted": true
+}
+```
+
+失败响应：
+- `400`: 缺少 `pack_id`，或 `pack_id` 不是合法 ObjectID
+- `404`: pack 不存在或已被逻辑删除
+- `500`: 删除 pack 失败
+
 ## Planned Domain APIs
 
 后续仍计划补充以下正式接口：
