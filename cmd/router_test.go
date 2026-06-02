@@ -36,12 +36,34 @@ func (s *fakeItemService) DeleteItem(_ context.Context, _ string) error {
 	return nil
 }
 
-func TestRegisterAPIRoutesExposesItemEndpoints(t *testing.T) {
+type fakePackService struct{}
+
+func (s *fakePackService) CreatePack(_ context.Context, _ request.CreatePackInput) (*domain.Pack, error) {
+	return &domain.Pack{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "pack"}, nil
+}
+
+func (s *fakePackService) ListPacks(_ context.Context, _ string) ([]domain.Pack, error) {
+	return []domain.Pack{}, nil
+}
+
+func (s *fakePackService) GetPack(_ context.Context, _ string) (*domain.Pack, error) {
+	return &domain.Pack{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "pack"}, nil
+}
+
+func (s *fakePackService) UpdatePack(_ context.Context, _ string, _ request.UpdatePackInput) (*domain.Pack, error) {
+	return &domain.Pack{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "pack"}, nil
+}
+
+func (s *fakePackService) DeletePack(_ context.Context, _ string) error {
+	return nil
+}
+
+func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	registerAPIRoutes(router, &fakeItemService{})
+	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{})
 
 	tests := []struct {
 		method string
@@ -52,6 +74,11 @@ func TestRegisterAPIRoutesExposesItemEndpoints(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/item/" + bson.NewObjectID().Hex()},
 		{method: http.MethodPut, path: "/api/v1/item/" + bson.NewObjectID().Hex()},
 		{method: http.MethodDelete, path: "/api/v1/item/" + bson.NewObjectID().Hex()},
+		{method: http.MethodPost, path: "/api/v1/pack"},
+		{method: http.MethodGet, path: "/api/v1/pack"},
+		{method: http.MethodGet, path: "/api/v1/pack/" + bson.NewObjectID().Hex()},
+		{method: http.MethodPut, path: "/api/v1/pack/" + bson.NewObjectID().Hex()},
+		{method: http.MethodDelete, path: "/api/v1/pack/" + bson.NewObjectID().Hex()},
 	}
 
 	for _, test := range tests {

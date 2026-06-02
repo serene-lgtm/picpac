@@ -20,22 +20,33 @@ func newRouter(cfg *config.Configuration, client *cos.Client, bucketURL *url.URL
 	router.Use(corsMiddleware(cfg.CORS.AllowedOrigins))
 
 	itemRepo := mongodb.NewItemRepository(db)
+	packRepo := mongodb.NewPackRepository(db)
 	uploadService := service.NewCOSUploadService(client, bucketURL)
 	itemService := service.NewItemService(itemRepo, uploadService)
+	packService := service.NewPackService(packRepo)
 
-	registerAPIRoutes(router, itemService)
+	registerAPIRoutes(router, itemService, packService)
 
 	return router
 }
 
-func registerAPIRoutes(router gin.IRoutes, itemService service.ItemService) {
+func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService) {
 	itemHandler := handler.NewItemHandler(itemService)
+	packHandler := handler.NewPackHandler(packService)
 
-	router.POST("/api/v1/item", itemHandler.CreateItem)
-	router.GET("/api/v1/item", itemHandler.ListItems)
-	router.GET("/api/v1/item/:item_id", itemHandler.GetItem)
-	router.PUT("/api/v1/item/:item_id", itemHandler.UpdateItem)
-	router.DELETE("/api/v1/item/:item_id", itemHandler.DeleteItem)
+	itemRoutes := router.Group("/api/v1/item")
+	itemRoutes.POST("", itemHandler.CreateItem)
+	itemRoutes.GET("", itemHandler.ListItems)
+	itemRoutes.GET("/:item_id", itemHandler.GetItem)
+	itemRoutes.PUT("/:item_id", itemHandler.UpdateItem)
+	itemRoutes.DELETE("/:item_id", itemHandler.DeleteItem)
+
+	packRoutes := router.Group("/api/v1/pack")
+	packRoutes.POST("", packHandler.CreatePack)
+	packRoutes.GET("", packHandler.ListPacks)
+	packRoutes.GET("/:pack_id", packHandler.GetPack)
+	packRoutes.PUT("/:pack_id", packHandler.UpdatePack)
+	packRoutes.DELETE("/:pack_id", packHandler.DeletePack)
 }
 
 func corsMiddleware(origins []string) gin.HandlerFunc {

@@ -17,3 +17,13 @@ type ItemRepository interface {
 	Update(ctx context.Context, item *domain.Item) error
 	DeleteByID(ctx context.Context, itemID bson.ObjectID) error
 }
+
+// PackRepository defines persistence behavior for packs.
+type PackRepository interface {
+	Create(ctx context.Context, pack *domain.Pack) error
+	ListAll(ctx context.Context) ([]domain.Pack, error)
+	ListByUserID(ctx context.Context, userID bson.ObjectID) ([]domain.Pack, error)
+	GetByID(ctx context.Context, packID bson.ObjectID) (*domain.Pack, error)
+	Update(ctx context.Context, pack *domain.Pack) error
+	DeleteByID(ctx context.Context, packID bson.ObjectID) error
+}
