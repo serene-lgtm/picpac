@@ -20,7 +20,7 @@ func (s *fakeItemService) CreateItem(_ context.Context, _ request.CreateItemInpu
 	return &domain.Item{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "item"}, nil
 }
 
-func (s *fakeItemService) ListItems(_ context.Context, _ string) ([]domain.Item, error) {
+func (s *fakeItemService) ListItems(_ context.Context, _ request.ListItemsInput) ([]domain.Item, error) {
 	return []domain.Item{}, nil
 }
 

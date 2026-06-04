@@ -31,7 +31,7 @@ func (s *fakeItemService) CreateItem(_ context.Context, _ request.CreateItemInpu
 	return s.defaultItem(), nil
 }
 
-func (s *fakeItemService) ListItems(_ context.Context, _ string) ([]domain.Item, error) {
+func (s *fakeItemService) ListItems(_ context.Context, _ request.ListItemsInput) ([]domain.Item, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -184,6 +184,87 @@ func TestListItemsHandlerRejectsInvalidUserID(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), "user_id is invalid") {
 		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestListItemsHandlerSearchesByQ(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	itemHandler := NewItemHandler(&fakeItemService{
+		items: []domain.Item{{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "手机充电器"}},
+	})
+	router.GET("/api/v1/item", itemHandler.ListItems)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/item?q=充电", nil)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `"name":"手机充电器"`) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestListItemsHandlerSearchesDescriptionByQ(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	itemHandler := NewItemHandler(&fakeItemService{
+		items: []domain.Item{{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "转换插头", Description: "支持手机充电器"}},
+	})
+	router.GET("/api/v1/item", itemHandler.ListItems)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/item?q=充电", nil)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `"description":"支持手机充电器"`) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestListItemsHandlerRejectsEmptyQ(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	itemHandler := NewItemHandler(&fakeItemService{})
+	router.GET("/api/v1/item", itemHandler.ListItems)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/item?q=+%20", nil)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "q is required") {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestListItemsHandlerMapsTooLongQ(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	itemHandler := NewItemHandler(&fakeItemService{err: errors.New("item search keyword is too long")})
+	router.GET("/api/v1/item", itemHandler.ListItems)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/item?q=充电", nil)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
 	}
 }
 

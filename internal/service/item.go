@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"pack_mate/internal/domain"
 	"pack_mate/internal/dto/request"
@@ -20,10 +21,12 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
+var maxItemSearchKeywordRunes = 50
+
 // ItemService defines item CRUD behavior.
 type ItemService interface {
 	CreateItem(ctx context.Context, input request.CreateItemInput) (*domain.Item, error)
-	ListItems(ctx context.Context, userID string) ([]domain.Item, error)
+	ListItems(ctx context.Context, input request.ListItemsInput) ([]domain.Item, error)
 	GetItem(ctx context.Context, itemID string) (*domain.Item, error)
 	UpdateItem(ctx context.Context, itemID string, input request.UpdateItemInput) (*domain.Item, error)
 	DeleteItem(ctx context.Context, itemID string) error
@@ -84,25 +87,58 @@ func (s *itemService) CreateItem(ctx context.Context, input request.CreateItemIn
 	return item, nil
 }
 
-// ListItems lists all items for a user.
-func (s *itemService) ListItems(ctx context.Context, userID string) ([]domain.Item, error) {
-	// TODO: Filter by authenticated user after user accounts/auth are implemented.
-	var items []domain.Item
-	var err error
-	if strings.TrimSpace(userID) == "" {
-		items, err = s.repo.ListAll(ctx)
+// ListItems lists all items or searches items by keyword.
+func (s *itemService) ListItems(ctx context.Context, input request.ListItemsInput) ([]domain.Item, error) {
+	var (
+		items []domain.Item
+		err   error
+	)
+	if input.HasQ {
+		items, err = s.searchItemsByKeyword(ctx, input.UserID, input.Q)
 	} else {
-		objectID, parseErr := parseObjectID(userID)
-		if parseErr != nil {
-			return nil, fmt.Errorf("invalid input")
-		}
-		items, err = s.repo.ListByUserID(ctx, objectID)
+		items, err = s.listItems(ctx, input.UserID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list items failed: %w", err)
 	}
 
 	return items, nil
+}
+
+func (s *itemService) listItems(ctx context.Context, userID string) ([]domain.Item, error) {
+	// TODO: Filter by authenticated user after user accounts/auth are implemented.
+	if strings.TrimSpace(userID) == "" {
+		return s.repo.ListAll(ctx)
+	}
+
+	objectID, err := parseObjectID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+
+	return s.repo.ListByUserID(ctx, objectID)
+}
+
+func (s *itemService) searchItemsByKeyword(ctx context.Context, userID string, keyword string) ([]domain.Item, error) {
+	// TODO: Filter by authenticated user after user accounts/auth are implemented.
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return nil, fmt.Errorf("item search keyword is required")
+	}
+	if utf8.RuneCountInString(keyword) > maxItemSearchKeywordRunes {
+		return nil, fmt.Errorf("item search keyword is too long")
+	}
+
+	if strings.TrimSpace(userID) == "" {
+		return s.repo.SearchByKeyword(ctx, keyword)
+	}
+
+	objectID, err := parseObjectID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+
+	return s.repo.SearchByKeywordAndUserID(ctx, objectID, keyword)
 }
 
 // GetItem gets a single item by ID.
