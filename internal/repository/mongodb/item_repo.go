@@ -2,6 +2,7 @@ package mongodb
 
 import (
 	"context"
+	"regexp"
 	"time"
 
 	"pack_mate/internal/domain"
@@ -67,6 +68,29 @@ func (r *ItemRepository) ListByUserID(ctx context.Context, userID bson.ObjectID)
 	return newDomainItems(docs), nil
 }
 
+// SearchByKeyword returns non-deleted items whose names or descriptions contain the keyword.
+func (r *ItemRepository) SearchByKeyword(ctx context.Context, keyword string) ([]domain.Item, error) {
+	docs, err := r.find(ctx, itemKeywordSearchFilter(keyword))
+	if err != nil {
+		return nil, err
+	}
+
+	return newDomainItems(docs), nil
+}
+
+// SearchByKeywordAndUserID returns non-deleted user items whose names or descriptions contain the keyword.
+func (r *ItemRepository) SearchByKeywordAndUserID(ctx context.Context, userID bson.ObjectID, keyword string) ([]domain.Item, error) {
+	filter := itemKeywordSearchFilter(keyword)
+	filter["uid"] = userID
+
+	docs, err := r.find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	return newDomainItems(docs), nil
+}
+
 // GetByID returns the item with the given ID.
 func (r *ItemRepository) GetByID(ctx context.Context, itemID bson.ObjectID) (*domain.Item, error) {
 	var doc itemDocument
@@ -111,6 +135,21 @@ func (r *ItemRepository) DeleteByID(ctx context.Context, itemID bson.ObjectID) e
 	}
 
 	return nil
+}
+
+func itemKeywordSearchFilter(keyword string) bson.M {
+	keywordPattern := bson.M{
+		"$regex":   regexp.QuoteMeta(keyword),
+		"$options": "i",
+	}
+
+	return bson.M{
+		"$or": bson.A{
+			bson.M{"nm": keywordPattern},
+			bson.M{"desc": keywordPattern},
+		},
+		"st": bson.M{"$ne": domain.ItemStatusDeleted},
+	}
 }
 
 func (r *ItemRepository) find(ctx context.Context, filter bson.M) ([]itemDocument, error) {

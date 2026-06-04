@@ -17,12 +17,14 @@ import (
 )
 
 type fakeItemRepository struct {
-	created *domain.Item
-	listed  []domain.Item
-	got     *domain.Item
-	updated *domain.Item
-	deleted bson.ObjectID
-	err     error
+	created       *domain.Item
+	listed        []domain.Item
+	searched      []domain.Item
+	searchKeyword string
+	got           *domain.Item
+	updated       *domain.Item
+	deleted       bson.ObjectID
+	err           error
 }
 
 func (r *fakeItemRepository) Create(_ context.Context, item *domain.Item) error {
@@ -43,6 +45,28 @@ func (r *fakeItemRepository) ListAll(_ context.Context) ([]domain.Item, error) {
 func (r *fakeItemRepository) ListByUserID(_ context.Context, _ bson.ObjectID) ([]domain.Item, error) {
 	if r.err != nil {
 		return nil, r.err
+	}
+	return r.listed, nil
+}
+
+func (r *fakeItemRepository) SearchByKeyword(_ context.Context, keyword string) ([]domain.Item, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	r.searchKeyword = keyword
+	if r.searched != nil {
+		return r.searched, nil
+	}
+	return r.listed, nil
+}
+
+func (r *fakeItemRepository) SearchByKeywordAndUserID(_ context.Context, _ bson.ObjectID, keyword string) ([]domain.Item, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	r.searchKeyword = keyword
+	if r.searched != nil {
+		return r.searched, nil
 	}
 	return r.listed, nil
 }
@@ -187,7 +211,7 @@ func TestListItemsReturnsRepositoryResults(t *testing.T) {
 	expected := []domain.Item{{UserID: userID, Name: "黑色双肩包"}}
 	svc := NewItemService(&fakeItemRepository{listed: expected}, &fakeUploadService{})
 
-	items, err := svc.ListItems(context.Background(), userID.Hex())
+	items, err := svc.ListItems(context.Background(), request.ListItemsInput{UserID: userID.Hex()})
 	if err != nil {
 		t.Fatalf("ListItems returned error: %v", err)
 	}
@@ -202,12 +226,118 @@ func TestListItemsAllowsMissingUserID(t *testing.T) {
 	expected := []domain.Item{{Name: "黑色双肩包"}}
 	svc := NewItemService(&fakeItemRepository{listed: expected}, &fakeUploadService{})
 
-	items, err := svc.ListItems(context.Background(), "")
+	items, err := svc.ListItems(context.Background(), request.ListItemsInput{})
 	if err != nil {
 		t.Fatalf("ListItems returned error: %v", err)
 	}
 	if len(items) != 1 || items[0].Name != "黑色双肩包" {
 		t.Fatalf("unexpected items: %+v", items)
+	}
+}
+
+func TestListItemsSearchesByChineseKeyword(t *testing.T) {
+	t.Parallel()
+
+	expected := []domain.Item{{Name: "手机充电器"}}
+	repo := &fakeItemRepository{searched: expected}
+	svc := NewItemService(repo, &fakeUploadService{})
+
+	items, err := svc.ListItems(context.Background(), request.ListItemsInput{
+		Q:    "  充电  ",
+		HasQ: true,
+	})
+	if err != nil {
+		t.Fatalf("ListItems returned error: %v", err)
+	}
+	if len(items) != 1 || items[0].Name != "手机充电器" {
+		t.Fatalf("unexpected items: %+v", items)
+	}
+	if repo.searchKeyword != "充电" {
+		t.Fatalf("expected trimmed keyword, got %q", repo.searchKeyword)
+	}
+}
+
+func TestListItemsSearchesByDescriptionKeyword(t *testing.T) {
+	t.Parallel()
+
+	expected := []domain.Item{{Name: "转换插头", Description: "支持手机充电器"}}
+	repo := &fakeItemRepository{searched: expected}
+	svc := NewItemService(repo, &fakeUploadService{})
+
+	items, err := svc.ListItems(context.Background(), request.ListItemsInput{
+		Q:    "充电",
+		HasQ: true,
+	})
+	if err != nil {
+		t.Fatalf("ListItems returned error: %v", err)
+	}
+	if len(items) != 1 || items[0].Description != "支持手机充电器" {
+		t.Fatalf("unexpected items: %+v", items)
+	}
+}
+
+func TestListItemsSearchesByUserID(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	expected := []domain.Item{{UserID: userID, Name: "手机充电器"}}
+	svc := NewItemService(&fakeItemRepository{searched: expected}, &fakeUploadService{})
+
+	items, err := svc.ListItems(context.Background(), request.ListItemsInput{
+		UserID: userID.Hex(),
+		Q:      "充电",
+		HasQ:   true,
+	})
+	if err != nil {
+		t.Fatalf("ListItems returned error: %v", err)
+	}
+	if len(items) != 1 || items[0].Name != "手机充电器" {
+		t.Fatalf("unexpected items: %+v", items)
+	}
+}
+
+func TestListItemsRejectsEmptySearchKeyword(t *testing.T) {
+	t.Parallel()
+
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{})
+
+	_, err := svc.ListItems(context.Background(), request.ListItemsInput{HasQ: true})
+	if err == nil || !strings.Contains(err.Error(), "item search keyword is required") {
+		t.Fatalf("expected keyword required error, got %v", err)
+	}
+}
+
+func TestListItemsRejectsTooLongSearchKeyword(t *testing.T) {
+	t.Parallel()
+
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{})
+	keyword := strings.Repeat("行", maxItemSearchKeywordRunes+1)
+
+	_, err := svc.ListItems(context.Background(), request.ListItemsInput{Q: keyword, HasQ: true})
+	if err == nil || !strings.Contains(err.Error(), "item search keyword is too long") {
+		t.Fatalf("expected keyword too long error, got %v", err)
+	}
+}
+
+func TestListItemsRejectsInvalidUserID(t *testing.T) {
+	t.Parallel()
+
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{})
+
+	_, err := svc.ListItems(context.Background(), request.ListItemsInput{UserID: "bad-user-id"})
+	if err == nil || !strings.Contains(err.Error(), "invalid input") {
+		t.Fatalf("expected invalid input, got %v", err)
+	}
+}
+
+func TestListItemsWrapsSearchRepositoryError(t *testing.T) {
+	t.Parallel()
+
+	svc := NewItemService(&fakeItemRepository{err: errors.New("db down")}, &fakeUploadService{})
+
+	_, err := svc.ListItems(context.Background(), request.ListItemsInput{Q: "充电", HasQ: true})
+	if err == nil || !strings.Contains(err.Error(), "list items failed") {
+		t.Fatalf("expected list items failure, got %v", err)
 	}
 }
 

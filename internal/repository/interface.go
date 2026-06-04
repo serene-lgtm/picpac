@@ -13,6 +13,8 @@ type ItemRepository interface {
 	Create(ctx context.Context, item *domain.Item) error
 	ListAll(ctx context.Context) ([]domain.Item, error)
 	ListByUserID(ctx context.Context, userID bson.ObjectID) ([]domain.Item, error)
+	SearchByKeyword(ctx context.Context, keyword string) ([]domain.Item, error)
+	SearchByKeywordAndUserID(ctx context.Context, userID bson.ObjectID, keyword string) ([]domain.Item, error)
 	GetByID(ctx context.Context, itemID bson.ObjectID) (*domain.Item, error)
 	Update(ctx context.Context, item *domain.Item) error
 	DeleteByID(ctx context.Context, itemID bson.ObjectID) error

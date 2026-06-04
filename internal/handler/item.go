@@ -67,7 +67,18 @@ func (h *ItemHandler) ListItems(c *gin.Context) {
 		return
 	}
 
-	items, err := h.svc.ListItems(c.Request.Context(), userID)
+	q, hasQ := c.GetQuery("q")
+	q = strings.TrimSpace(q)
+	if hasQ && q == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "q is required"})
+		return
+	}
+
+	items, err := h.svc.ListItems(c.Request.Context(), request.ListItemsInput{
+		UserID: userID,
+		Q:      q,
+		HasQ:   hasQ,
+	})
 	if err != nil {
 		respondItemError(c, err)
 		return
@@ -153,7 +164,9 @@ func respondItemError(c *gin.Context, err error) {
 	message := err.Error()
 	switch {
 	case strings.Contains(message, "invalid input"),
-		strings.Contains(message, "item name is required"):
+		strings.Contains(message, "item name is required"),
+		strings.Contains(message, "item search keyword is required"),
+		strings.Contains(message, "item search keyword is too long"):
 		status = http.StatusBadRequest
 	case strings.Contains(message, "item not found"):
 		status = http.StatusNotFound
