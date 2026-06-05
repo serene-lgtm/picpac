@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"pack_mate/internal/domain"
 	"pack_mate/internal/dto/request"
@@ -15,10 +16,12 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
+var maxPackSearchKeywordRunes = 50
+
 // PackService defines pack behavior.
 type PackService interface {
 	CreatePack(ctx context.Context, input request.CreatePackInput) (*domain.Pack, error)
-	ListPacks(ctx context.Context, userID string) ([]domain.Pack, error)
+	ListPacks(ctx context.Context, input request.ListPacksInput) ([]domain.Pack, error)
 	GetPack(ctx context.Context, packID string) (*domain.Pack, error)
 	UpdatePack(ctx context.Context, packID string, input request.UpdatePackInput) (*domain.Pack, error)
 	DeletePack(ctx context.Context, packID string) error
@@ -70,25 +73,58 @@ func (s *packService) CreatePack(ctx context.Context, input request.CreatePackIn
 	return pack, nil
 }
 
-// ListPacks lists packs for a user.
-func (s *packService) ListPacks(ctx context.Context, userID string) ([]domain.Pack, error) {
-	// TODO: Filter by authenticated user after user accounts/auth are implemented.
-	var packs []domain.Pack
-	var err error
-	if strings.TrimSpace(userID) == "" {
-		packs, err = s.repo.ListAll(ctx)
+// ListPacks lists all packs or searches packs by keyword.
+func (s *packService) ListPacks(ctx context.Context, input request.ListPacksInput) ([]domain.Pack, error) {
+	var (
+		packs []domain.Pack
+		err   error
+	)
+	if input.HasQ {
+		packs, err = s.searchPacksByKeyword(ctx, input.UserID, input.Q)
 	} else {
-		objectID, parseErr := parseObjectID(userID)
-		if parseErr != nil {
-			return nil, fmt.Errorf("invalid input")
-		}
-		packs, err = s.repo.ListByUserID(ctx, objectID)
+		packs, err = s.listPacks(ctx, input.UserID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list packs failed: %w", err)
 	}
 
 	return packs, nil
+}
+
+func (s *packService) listPacks(ctx context.Context, userID string) ([]domain.Pack, error) {
+	// TODO: Filter by authenticated user after user accounts/auth are implemented.
+	if strings.TrimSpace(userID) == "" {
+		return s.repo.ListAll(ctx)
+	}
+
+	objectID, err := parseObjectID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+
+	return s.repo.ListByUserID(ctx, objectID)
+}
+
+func (s *packService) searchPacksByKeyword(ctx context.Context, userID string, keyword string) ([]domain.Pack, error) {
+	// TODO: Filter by authenticated user after user accounts/auth are implemented.
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return nil, fmt.Errorf("pack search keyword is required")
+	}
+	if utf8.RuneCountInString(keyword) > maxPackSearchKeywordRunes {
+		return nil, fmt.Errorf("pack search keyword is too long")
+	}
+
+	if strings.TrimSpace(userID) == "" {
+		return s.repo.SearchByKeyword(ctx, keyword)
+	}
+
+	objectID, err := parseObjectID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+
+	return s.repo.SearchByKeywordAndUserID(ctx, objectID, keyword)
 }
 
 // GetPack gets a single pack by ID.

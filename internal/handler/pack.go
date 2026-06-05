@@ -63,7 +63,18 @@ func (h *PackHandler) ListPacks(c *gin.Context) {
 		return
 	}
 
-	packs, err := h.svc.ListPacks(c.Request.Context(), userID)
+	q, hasQ := c.GetQuery("q")
+	q = strings.TrimSpace(q)
+	if hasQ && q == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "q is required"})
+		return
+	}
+
+	packs, err := h.svc.ListPacks(c.Request.Context(), request.ListPacksInput{
+		UserID: userID,
+		Q:      q,
+		HasQ:   hasQ,
+	})
 	if err != nil {
 		respondPackError(c, err)
 		return
@@ -160,7 +171,9 @@ func respondPackError(c *gin.Context, err error) {
 	message := err.Error()
 	switch {
 	case strings.Contains(message, "invalid input"),
-		strings.Contains(message, "pack name is required"):
+		strings.Contains(message, "pack name is required"),
+		strings.Contains(message, "pack search keyword is required"),
+		strings.Contains(message, "pack search keyword is too long"):
 		status = http.StatusBadRequest
 	case strings.Contains(message, "pack not found"):
 		status = http.StatusNotFound

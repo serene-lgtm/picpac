@@ -42,7 +42,7 @@ func (s *fakePackService) CreatePack(_ context.Context, _ request.CreatePackInpu
 	return &domain.Pack{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "pack"}, nil
 }
 
-func (s *fakePackService) ListPacks(_ context.Context, _ string) ([]domain.Pack, error) {
+func (s *fakePackService) ListPacks(_ context.Context, _ request.ListPacksInput) ([]domain.Pack, error) {
 	return []domain.Pack{}, nil
 }
 

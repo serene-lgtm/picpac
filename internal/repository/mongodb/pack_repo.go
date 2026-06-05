@@ -2,6 +2,7 @@ package mongodb
 
 import (
 	"context"
+	"regexp"
 	"time"
 
 	"pack_mate/internal/domain"
@@ -65,6 +66,29 @@ func (r *PackRepository) ListByUserID(ctx context.Context, userID bson.ObjectID)
 	return newDomainPacks(docs), nil
 }
 
+// SearchByKeyword returns non-deleted packs whose names or descriptions contain the keyword.
+func (r *PackRepository) SearchByKeyword(ctx context.Context, keyword string) ([]domain.Pack, error) {
+	docs, err := r.find(ctx, packKeywordSearchFilter(keyword))
+	if err != nil {
+		return nil, err
+	}
+
+	return newDomainPacks(docs), nil
+}
+
+// SearchByKeywordAndUserID returns non-deleted user packs whose names or descriptions contain the keyword.
+func (r *PackRepository) SearchByKeywordAndUserID(ctx context.Context, userID bson.ObjectID, keyword string) ([]domain.Pack, error) {
+	filter := packKeywordSearchFilter(keyword)
+	filter["uid"] = userID
+
+	docs, err := r.find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	return newDomainPacks(docs), nil
+}
+
 // GetByID returns the non-deleted pack with the given ID.
 func (r *PackRepository) GetByID(ctx context.Context, packID bson.ObjectID) (*domain.Pack, error) {
 	var doc packDocument
@@ -115,6 +139,21 @@ func (r *PackRepository) DeleteByID(ctx context.Context, packID bson.ObjectID) e
 	}
 
 	return nil
+}
+
+func packKeywordSearchFilter(keyword string) bson.M {
+	keywordPattern := bson.M{
+		"$regex":   regexp.QuoteMeta(keyword),
+		"$options": "i",
+	}
+
+	return bson.M{
+		"$or": bson.A{
+			bson.M{"nm": keywordPattern},
+			bson.M{"desc": keywordPattern},
+		},
+		"st": bson.M{"$ne": domain.PackStatusDeleted},
+	}
 }
 
 func (r *PackRepository) find(ctx context.Context, filter bson.M) ([]packDocument, error) {

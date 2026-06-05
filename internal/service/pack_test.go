@@ -14,13 +14,15 @@ import (
 )
 
 type fakePackRepository struct {
-	created   *domain.Pack
-	listed    []domain.Pack
-	got       *domain.Pack
-	updated   *domain.Pack
-	deleted   bson.ObjectID
-	err       error
-	updateErr error
+	created       *domain.Pack
+	listed        []domain.Pack
+	searched      []domain.Pack
+	searchKeyword string
+	got           *domain.Pack
+	updated       *domain.Pack
+	deleted       bson.ObjectID
+	err           error
+	updateErr     error
 }
 
 func (r *fakePackRepository) Create(_ context.Context, pack *domain.Pack) error {
@@ -41,6 +43,28 @@ func (r *fakePackRepository) ListAll(_ context.Context) ([]domain.Pack, error) {
 func (r *fakePackRepository) ListByUserID(_ context.Context, _ bson.ObjectID) ([]domain.Pack, error) {
 	if r.err != nil {
 		return nil, r.err
+	}
+	return r.listed, nil
+}
+
+func (r *fakePackRepository) SearchByKeyword(_ context.Context, keyword string) ([]domain.Pack, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	r.searchKeyword = keyword
+	if r.searched != nil {
+		return r.searched, nil
+	}
+	return r.listed, nil
+}
+
+func (r *fakePackRepository) SearchByKeywordAndUserID(_ context.Context, _ bson.ObjectID, keyword string) ([]domain.Pack, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	r.searchKeyword = keyword
+	if r.searched != nil {
+		return r.searched, nil
 	}
 	return r.listed, nil
 }
@@ -182,7 +206,7 @@ func TestListPacksReturnsRepositoryResults(t *testing.T) {
 	expected := []domain.Pack{{UserID: userID, Name: "日本出差", Status: domain.PackStatusCreated}}
 	svc := NewPackService(&fakePackRepository{listed: expected})
 
-	packs, err := svc.ListPacks(context.Background(), userID.Hex())
+	packs, err := svc.ListPacks(context.Background(), request.ListPacksInput{UserID: userID.Hex()})
 	if err != nil {
 		t.Fatalf("ListPacks returned error: %v", err)
 	}
@@ -197,7 +221,7 @@ func TestListPacksAllowsMissingUserID(t *testing.T) {
 	expected := []domain.Pack{{Name: "日本出差", Status: domain.PackStatusCreated}}
 	svc := NewPackService(&fakePackRepository{listed: expected})
 
-	packs, err := svc.ListPacks(context.Background(), "")
+	packs, err := svc.ListPacks(context.Background(), request.ListPacksInput{})
 	if err != nil {
 		t.Fatalf("ListPacks returned error: %v", err)
 	}
@@ -211,7 +235,7 @@ func TestListPacksRejectsInvalidUserID(t *testing.T) {
 
 	svc := NewPackService(&fakePackRepository{})
 
-	_, err := svc.ListPacks(context.Background(), "bad-user-id")
+	_, err := svc.ListPacks(context.Background(), request.ListPacksInput{UserID: "bad-user-id"})
 	if err == nil || !strings.Contains(err.Error(), "invalid input") {
 		t.Fatalf("expected invalid input, got %v", err)
 	}
@@ -222,7 +246,101 @@ func TestListPacksMapsRepositoryFailure(t *testing.T) {
 
 	svc := NewPackService(&fakePackRepository{err: errors.New("database down")})
 
-	_, err := svc.ListPacks(context.Background(), "")
+	_, err := svc.ListPacks(context.Background(), request.ListPacksInput{})
+	if err == nil || !strings.Contains(err.Error(), "list packs failed") {
+		t.Fatalf("expected list packs failure, got %v", err)
+	}
+}
+
+func TestListPacksSearchesByNameKeyword(t *testing.T) {
+	t.Parallel()
+
+	expected := []domain.Pack{{Name: "日本出差", Description: "东京 5 天商务行程", Status: domain.PackStatusCreated}}
+	repo := &fakePackRepository{searched: expected}
+	svc := NewPackService(repo)
+
+	packs, err := svc.ListPacks(context.Background(), request.ListPacksInput{
+		Q:    "  出差  ",
+		HasQ: true,
+	})
+	if err != nil {
+		t.Fatalf("ListPacks returned error: %v", err)
+	}
+	if len(packs) != 1 || packs[0].Name != "日本出差" {
+		t.Fatalf("unexpected packs: %+v", packs)
+	}
+	if repo.searchKeyword != "出差" {
+		t.Fatalf("expected trimmed keyword, got %q", repo.searchKeyword)
+	}
+}
+
+func TestListPacksSearchesByDescriptionKeyword(t *testing.T) {
+	t.Parallel()
+
+	expected := []domain.Pack{{Name: "商务行程", Description: "东京 5 天", Status: domain.PackStatusCreated}}
+	svc := NewPackService(&fakePackRepository{searched: expected})
+
+	packs, err := svc.ListPacks(context.Background(), request.ListPacksInput{
+		Q:    "东京",
+		HasQ: true,
+	})
+	if err != nil {
+		t.Fatalf("ListPacks returned error: %v", err)
+	}
+	if len(packs) != 1 || packs[0].Description != "东京 5 天" {
+		t.Fatalf("unexpected packs: %+v", packs)
+	}
+}
+
+func TestListPacksSearchesByUserID(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	expected := []domain.Pack{{UserID: userID, Name: "日本出差", Status: domain.PackStatusCreated}}
+	svc := NewPackService(&fakePackRepository{searched: expected})
+
+	packs, err := svc.ListPacks(context.Background(), request.ListPacksInput{
+		UserID: userID.Hex(),
+		Q:      "出差",
+		HasQ:   true,
+	})
+	if err != nil {
+		t.Fatalf("ListPacks returned error: %v", err)
+	}
+	if len(packs) != 1 || packs[0].Name != "日本出差" {
+		t.Fatalf("unexpected packs: %+v", packs)
+	}
+}
+
+func TestListPacksRejectsEmptySearchKeyword(t *testing.T) {
+	t.Parallel()
+
+	svc := NewPackService(&fakePackRepository{})
+
+	_, err := svc.ListPacks(context.Background(), request.ListPacksInput{HasQ: true})
+	if err == nil || !strings.Contains(err.Error(), "pack search keyword is required") {
+		t.Fatalf("expected keyword required error, got %v", err)
+	}
+}
+
+func TestListPacksRejectsTooLongSearchKeyword(t *testing.T) {
+	t.Parallel()
+
+	svc := NewPackService(&fakePackRepository{})
+	keyword := strings.Repeat("行", maxPackSearchKeywordRunes+1)
+
+	_, err := svc.ListPacks(context.Background(), request.ListPacksInput{Q: keyword, HasQ: true})
+	if err == nil || !strings.Contains(err.Error(), "pack search keyword is too long") {
+		t.Fatalf("expected keyword too long error, got %v", err)
+	}
+}
+
+func TestListPacksWrapsSearchRepositoryError(t *testing.T) {
+	t.Parallel()
+
+	svc := NewPackService(&fakePackRepository{err: errors.New("database down")})
+
+	_, err := svc.ListPacks(context.Background(), request.ListPacksInput{Q: "出差", HasQ: true})
 	if err == nil || !strings.Contains(err.Error(), "list packs failed") {
 		t.Fatalf("expected list packs failure, got %v", err)
 	}

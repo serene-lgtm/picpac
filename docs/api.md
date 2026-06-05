@@ -265,12 +265,23 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 用途：
 - 查询 pack 列表
 - 当前阶段 `user_id` 可选；不传时返回全部未删除 pack
+- 可通过 `q` 按 pack name 或 description 做关键词子串匹配，主要用于中文 pack 搜索
 - `status` 是内部状态，不支持作为 query 参数过滤
 - 默认按创建时间倒序返回
 - 已逻辑删除的 pack 不会出现在列表中
 
 请求参数：
 - `user_id`: string，可选，放在 query string 中。用户系统接入后会恢复为必填或从登录态获取
+- `q`: string，可选，按 pack name 或 description 子串匹配；当前最大长度为 50 个字符，传空字符串会返回 `400`
+
+搜索示例：
+
+`GET /api/v1/pack?q=东京`
+
+说明：
+- `q=东京` 可以匹配 `日本出差` 这类 name，也可以匹配 description 中包含 `东京` 的 pack
+- 中文关键词不做分词，按原始子串匹配
+- 英文关键词大小写不敏感
 
 成功响应：
 
@@ -300,7 +311,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```
 
 失败响应：
-- `400`: `user_id` 不是合法 ObjectID
+- `400`: `user_id` 不是合法 ObjectID，或 `q` 为空/超过最大长度
 - `500`: 查询 pack 列表失败
 
 ### Get Pack
