@@ -30,7 +30,7 @@ func (s *fakePackService) CreatePack(_ context.Context, _ request.CreatePackInpu
 	return s.defaultPack(), nil
 }
 
-func (s *fakePackService) ListPacks(_ context.Context, _ string) ([]domain.Pack, error) {
+func (s *fakePackService) ListPacks(_ context.Context, _ request.ListPacksInput) ([]domain.Pack, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -231,6 +231,65 @@ func TestListPacksHandlerRejectsInvalidUserID(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), "user_id is invalid") {
 		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestListPacksHandlerSearchesByQ(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	packHandler := NewPackHandler(&fakePackService{
+		packs: []domain.Pack{{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "日本出差", Description: "东京 5 天"}},
+	})
+	router.GET("/api/v1/pack", packHandler.ListPacks)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/pack?q=东京", nil)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `"description":"东京 5 天"`) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestListPacksHandlerRejectsEmptyQ(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	packHandler := NewPackHandler(&fakePackService{})
+	router.GET("/api/v1/pack", packHandler.ListPacks)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/pack?q=+%20", nil)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "q is required") {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestListPacksHandlerMapsTooLongQ(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	packHandler := NewPackHandler(&fakePackService{err: errors.New("pack search keyword is too long")})
+	router.GET("/api/v1/pack", packHandler.ListPacks)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/pack?q=东京", nil)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
 	}
 }
 

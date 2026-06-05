@@ -25,6 +25,8 @@ type PackRepository interface {
 	Create(ctx context.Context, pack *domain.Pack) error
 	ListAll(ctx context.Context) ([]domain.Pack, error)
 	ListByUserID(ctx context.Context, userID bson.ObjectID) ([]domain.Pack, error)
+	SearchByKeyword(ctx context.Context, keyword string) ([]domain.Pack, error)
+	SearchByKeywordAndUserID(ctx context.Context, userID bson.ObjectID, keyword string) ([]domain.Pack, error)
 	GetByID(ctx context.Context, packID bson.ObjectID) (*domain.Pack, error)
 	Update(ctx context.Context, pack *domain.Pack) error
 	DeleteByID(ctx context.Context, packID bson.ObjectID) error

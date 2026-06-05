@@ -8,6 +8,13 @@ type CreatePackInput struct {
 	Items       []string `json:"items"`
 }
 
+// ListPacksInput defines the service input for listing packs.
+type ListPacksInput struct {
+	UserID string
+	Q      string
+	HasQ   bool
+}
+
 // UpdatePackInput defines the service input for updating a pack.
 type UpdatePackInput struct {
 	Name        string   `json:"name"`
