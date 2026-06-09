@@ -58,12 +58,42 @@ func (s *fakePackService) DeletePack(_ context.Context, _ string) error {
 	return nil
 }
 
+type fakeChecklistService struct{}
+
+func (s *fakeChecklistService) CreateChecklist(_ context.Context, _ request.CreateChecklistInput) (*domain.Checklist, error) {
+	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
+}
+
+func (s *fakeChecklistService) ListChecklists(_ context.Context, _ request.ListChecklistsInput) ([]domain.Checklist, error) {
+	return []domain.Checklist{}, nil
+}
+
+func (s *fakeChecklistService) GetChecklist(_ context.Context, _ string) (*domain.Checklist, error) {
+	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
+}
+
+func (s *fakeChecklistService) UpdateChecklist(_ context.Context, _ string, _ request.UpdateChecklistInput) (*domain.Checklist, error) {
+	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
+}
+
+func (s *fakeChecklistService) AddChecklistLineItems(_ context.Context, _ string, _ request.AddChecklistLineItemsInput) (*domain.Checklist, error) {
+	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
+}
+
+func (s *fakeChecklistService) RemoveChecklistLineItems(_ context.Context, _ string, _ request.RemoveChecklistLineItemsInput) (*domain.Checklist, error) {
+	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
+}
+
+func (s *fakeChecklistService) DeleteChecklist(_ context.Context, _ string) error {
+	return nil
+}
+
 func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{})
+	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{})
 
 	tests := []struct {
 		method string
@@ -79,6 +109,13 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/pack/" + bson.NewObjectID().Hex()},
 		{method: http.MethodPut, path: "/api/v1/pack/" + bson.NewObjectID().Hex()},
 		{method: http.MethodDelete, path: "/api/v1/pack/" + bson.NewObjectID().Hex()},
+		{method: http.MethodPost, path: "/api/v1/checklist"},
+		{method: http.MethodGet, path: "/api/v1/checklist"},
+		{method: http.MethodGet, path: "/api/v1/checklist/" + bson.NewObjectID().Hex()},
+		{method: http.MethodPut, path: "/api/v1/checklist/" + bson.NewObjectID().Hex()},
+		{method: http.MethodPost, path: "/api/v1/checklist/" + bson.NewObjectID().Hex() + "/items"},
+		{method: http.MethodDelete, path: "/api/v1/checklist/" + bson.NewObjectID().Hex() + "/items"},
+		{method: http.MethodDelete, path: "/api/v1/checklist/" + bson.NewObjectID().Hex()},
 	}
 
 	for _, test := range tests {

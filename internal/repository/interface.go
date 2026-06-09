@@ -31,3 +31,15 @@ type PackRepository interface {
 	Update(ctx context.Context, pack *domain.Pack) error
 	DeleteByID(ctx context.Context, packID bson.ObjectID) error
 }
+
+// ChecklistRepository defines persistence behavior for checklists.
+type ChecklistRepository interface {
+	Create(ctx context.Context, checklist *domain.Checklist) error
+	ListAll(ctx context.Context) ([]domain.Checklist, error)
+	ListByUserID(ctx context.Context, userID bson.ObjectID) ([]domain.Checklist, error)
+	SearchByKeyword(ctx context.Context, keyword string) ([]domain.Checklist, error)
+	SearchByKeywordAndUserID(ctx context.Context, userID bson.ObjectID, keyword string) ([]domain.Checklist, error)
+	GetByID(ctx context.Context, checklistID bson.ObjectID) (*domain.Checklist, error)
+	Update(ctx context.Context, checklist *domain.Checklist) error
+	DeleteByID(ctx context.Context, checklistID bson.ObjectID) error
+}
