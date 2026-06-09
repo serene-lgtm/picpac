@@ -21,18 +21,21 @@ func newRouter(cfg *config.Configuration, client *cos.Client, bucketURL *url.URL
 
 	itemRepo := mongodb.NewItemRepository(db)
 	packRepo := mongodb.NewPackRepository(db)
+	checklistRepo := mongodb.NewChecklistRepository(db)
 	uploadService := service.NewCOSUploadService(client, bucketURL)
 	itemService := service.NewItemService(itemRepo, uploadService)
 	packService := service.NewPackService(packRepo)
+	checklistService := service.NewChecklistService(checklistRepo, itemRepo)
 
-	registerAPIRoutes(router, itemService, packService)
+	registerAPIRoutes(router, itemService, packService, checklistService)
 
 	return router
 }
 
-func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService) {
+func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService, checklistService service.ChecklistService) {
 	itemHandler := handler.NewItemHandler(itemService)
 	packHandler := handler.NewPackHandler(packService)
+	checklistHandler := handler.NewChecklistHandler(checklistService)
 
 	itemRoutes := router.Group("/api/v1/item")
 	itemRoutes.POST("", itemHandler.CreateItem)
@@ -47,6 +50,15 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 	packRoutes.GET("/:pack_id", packHandler.GetPack)
 	packRoutes.PUT("/:pack_id", packHandler.UpdatePack)
 	packRoutes.DELETE("/:pack_id", packHandler.DeletePack)
+
+	checklistRoutes := router.Group("/api/v1/checklist")
+	checklistRoutes.POST("", checklistHandler.CreateChecklist)
+	checklistRoutes.GET("", checklistHandler.ListChecklists)
+	checklistRoutes.GET("/:checklist_id", checklistHandler.GetChecklist)
+	checklistRoutes.PUT("/:checklist_id", checklistHandler.UpdateChecklist)
+	checklistRoutes.POST("/:checklist_id/items", checklistHandler.AddChecklistLineItems)
+	checklistRoutes.DELETE("/:checklist_id/items", checklistHandler.RemoveChecklistLineItems)
+	checklistRoutes.DELETE("/:checklist_id", checklistHandler.DeleteChecklist)
 }
 
 func corsMiddleware(origins []string) gin.HandlerFunc {

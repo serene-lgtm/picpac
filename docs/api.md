@@ -426,6 +426,271 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `404`: pack 不存在或已被逻辑删除
 - `500`: 删除 pack 失败
 
+### Create Checklist
+
+`POST /api/v1/checklist`
+
+用途：
+- 创建一个 checklist
+- `user_id` 当前阶段可选；用户系统接入后会恢复为必填或从登录态获取
+- 新创建的 checklist 会默认写入 `created` 状态
+- `items` 是 line item 列表；如果 `reference_type` 是 `item`，`reference_id` 必须是 item id，且不能传 `snapshot`；如果 `reference_type` 是 `snapshot`，`reference_id` 必须为空，且必须传 `snapshot.name`
+- `reference_type` 是 `item` 时，后端会校验对应 item 存在且未被逻辑删除
+- line item 初始状态统一为 `unchecked`
+
+请求类型：
+- `application/json`
+
+请求字段：
+- `user_id`: string，可选。用户系统接入后会恢复为必填或从登录态获取
+- `name`: string，必填
+- `description`: string，可选
+- `target_date`: string，必填，格式为 `YYYY-MM-DD`
+- `items`: object array，可选
+
+请求示例：
+
+```json
+{
+  "name": "日本出差 checklist",
+  "description": "东京 5 天商务行程",
+  "target_date": "2026-07-01",
+  "items": [
+    {
+      "reference_type": "item",
+      "reference_id": "6821c0c1f1b2f4d5a6b7c8d9"
+    },
+    {
+      "reference_type": "snapshot",
+      "reference_id": "",
+      "snapshot": {
+        "name": "临时雨伞"
+      }
+    }
+  ]
+}
+```
+
+成功响应：
+
+```json
+{
+  "id": "6821c0c1f1b2f4d5a6b7c8e0",
+  "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "name": "日本出差 checklist",
+  "description": "东京 5 天商务行程",
+  "target_date": "2026-07-01",
+  "items": [
+    {
+      "id": "6821c0c1f1b2f4d5a6b7c8e1",
+      "reference_type": "item",
+      "reference_id": "6821c0c1f1b2f4d5a6b7c8d9",
+      "snapshot": null,
+      "status": "unchecked"
+    },
+    {
+      "id": "6821c0c1f1b2f4d5a6b7c8e2",
+      "reference_type": "snapshot",
+      "reference_id": "",
+      "snapshot": {
+        "name": "临时雨伞"
+      },
+      "status": "unchecked"
+    }
+  ],
+  "status": "created"
+}
+```
+
+失败响应：
+- `400`: 缺少 `name`、`target_date`，`user_id` 非法，字段格式非法，line item 非法，或引用的 item 不存在/已删除
+- `500`: 创建 checklist 失败
+
+### List Checklists
+
+`GET /api/v1/checklist`
+
+用途：
+- 查询 checklist 列表
+- 当前阶段 `user_id` 可选；不传时返回全部未删除 checklist
+- 可通过 `q` 按 checklist name 或 description 做关键词子串匹配
+- 默认按创建时间倒序返回
+- 已逻辑删除的 checklist 不会出现在列表中
+
+请求参数：
+- `user_id`: string，可选，放在 query string 中。用户系统接入后会恢复为必填或从登录态获取
+- `q`: string，可选，按 checklist name 或 description 子串匹配；当前最大长度为 50 个字符，传空字符串会返回 `400`
+
+成功响应：
+
+```json
+{
+  "checklists": []
+}
+```
+
+失败响应：
+- `400`: `user_id` 不是合法 ObjectID，或 `q` 为空/超过最大长度
+- `500`: 查询 checklist 列表失败
+
+### Get Checklist
+
+`GET /api/v1/checklist/:checklist_id`
+
+用途：
+- 根据 `checklist_id` 读取单个 checklist 详情
+- 如果 checklist 已被逻辑删除，则按不存在处理
+
+路径参数：
+- `checklist_id`: string，必填，checklist 主键
+
+成功响应：
+- 同 Create Checklist 成功响应结构
+
+失败响应：
+- `400`: 缺少 `checklist_id`，或 `checklist_id` 不是合法 ObjectID
+- `404`: checklist 不存在
+- `500`: 查询 checklist 失败
+
+### Update Checklist
+
+`PUT /api/v1/checklist/:checklist_id`
+
+用途：
+- 更新单个 checklist 的 metadata
+- 前端提交更新后的 `name`、`description`、`target_date`
+- 后端会保留 `id`、`user_id`、`status`、`created_at` 等系统字段，并更新 `updated_at`
+- `items` 不允许通过该接口更新；line item 需要使用 Add/Remove Checklist Line Items 接口修改
+- 如果 checklist 已被逻辑删除，则不允许更新
+
+请求类型：
+- `application/json`
+
+路径参数：
+- `checklist_id`: string，必填，checklist 主键
+
+请求字段：
+- `name`: string，必填
+- `description`: string，可选
+- `target_date`: string，必填，格式为 `YYYY-MM-DD`
+
+失败响应：
+- `400`: 缺少 `name`、`target_date`，`checklist_id` 非法，字段格式非法，或请求体包含 `items`
+- `404`: checklist 不存在
+- `500`: 更新 checklist 失败
+
+### Add Checklist Line Items
+
+`POST /api/v1/checklist/:checklist_id/items`
+
+用途：
+- 向指定 checklist 批量增加 line item
+- 新增 line item 会自动生成自己的 `id`
+- 新增 line item 初始状态统一为 `unchecked`
+- 如果 line item 的 `reference_type` 是 `item`，后端会校验对应 item 存在且未被逻辑删除
+- 更新成功后会更新 checklist 的 `updated_at`
+
+请求类型：
+- `application/json`
+
+路径参数：
+- `checklist_id`: string，必填，checklist 主键
+
+请求字段：
+- `items`: object array，必填且不能为空
+- `items[].reference_type`: string，必填，只支持 `item` 或 `snapshot`
+- `items[].reference_id`: string。当 `reference_type` 为 `item` 时必填且必须是存在、未删除的 item id；当 `reference_type` 为 `snapshot` 时必须为空
+- `items[].snapshot`: object。当 `reference_type` 为 `snapshot` 时必填
+- `items[].snapshot.name`: string，当 `reference_type` 为 `snapshot` 时必填
+
+请求示例：
+
+```json
+{
+  "items": [
+    {
+      "reference_type": "item",
+      "reference_id": "6821c0c1f1b2f4d5a6b7c8d9"
+    },
+    {
+      "reference_type": "snapshot",
+      "snapshot": {
+        "name": "临时雨伞"
+      }
+    }
+  ]
+}
+```
+
+成功响应：
+- 同 Create Checklist 成功响应结构，返回增加后的完整 checklist
+
+失败响应：
+- `400`: 缺少 `items`，`checklist_id` 非法，line item 非法，或引用的 item 不存在/已删除
+- `404`: checklist 不存在
+- `500`: 更新 checklist 失败
+
+### Remove Checklist Line Items
+
+`DELETE /api/v1/checklist/:checklist_id/items`
+
+用途：
+- 从指定 checklist 批量移除 line item
+- 只有请求中的所有 `line_item_ids` 都属于当前 checklist 时才会更新
+- 更新成功后会更新 checklist 的 `updated_at`
+
+请求类型：
+- `application/json`
+
+路径参数：
+- `checklist_id`: string，必填，checklist 主键
+
+请求字段：
+- `line_item_ids`: string array，必填且不能为空，值为 checklist line item 的 `id`
+
+请求示例：
+
+```json
+{
+  "line_item_ids": [
+    "6821c0c1f1b2f4d5a6b7c8e1",
+    "6821c0c1f1b2f4d5a6b7c8e2"
+  ]
+}
+```
+
+成功响应：
+- 同 Create Checklist 成功响应结构，返回移除后的完整 checklist
+
+失败响应：
+- `400`: 缺少 `line_item_ids`，`checklist_id` 非法，或 `line_item_ids` 中存在非法 ObjectID
+- `404`: checklist 不存在，或存在不属于该 checklist 的 line item id
+- `500`: 更新 checklist 失败
+
+### Delete Checklist
+
+`DELETE /api/v1/checklist/:checklist_id`
+
+用途：
+- 逻辑删除单个 checklist
+- 删除后会把 `status` 置为 `deleted`，不会真的从 MongoDB 中移除
+
+路径参数：
+- `checklist_id`: string，必填，checklist 主键
+
+成功响应：
+
+```json
+{
+  "deleted": true
+}
+```
+
+失败响应：
+- `400`: 缺少 `checklist_id`，或 `checklist_id` 不是合法 ObjectID
+- `404`: checklist 不存在或已被逻辑删除
+- `500`: 删除 checklist 失败
+
 ## Planned Domain APIs
 
 后续仍计划补充以下正式接口：
