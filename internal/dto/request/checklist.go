@@ -44,3 +44,8 @@ type AddChecklistLineItemsInput struct {
 type RemoveChecklistLineItemsInput struct {
 	LineItemIDs []string `json:"line_item_ids"`
 }
+
+// UpdateChecklistLineItemStatusInput defines the service input for updating checklist line item status.
+type UpdateChecklistLineItemStatusInput struct {
+	Status string `json:"status"`
+}

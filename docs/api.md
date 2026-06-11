@@ -667,6 +667,41 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `404`: checklist 不存在，或存在不属于该 checklist 的 line item id
 - `500`: 更新 checklist 失败
 
+### Update Checklist Line Item Status
+
+`PATCH /api/v1/checklist/:checklist_id/items/:line_item_id/status`
+
+用途：
+- 更新指定 checklist 中单个 line item 的勾选状态
+- 每次请求只更新一个 line item 的 `status`
+- 更新成功后会更新 checklist 的 `updated_at`
+
+请求类型：
+- `application/json`
+
+路径参数：
+- `checklist_id`: string，必填，checklist 主键
+- `line_item_id`: string，必填，checklist line item 主键
+
+请求字段：
+- `status`: string，必填，只允许 `checked` 或 `unchecked`
+
+请求示例：
+
+```json
+{
+  "status": "checked"
+}
+```
+
+成功响应：
+- 同 Create Checklist 成功响应结构，返回更新后的完整 checklist
+
+失败响应：
+- `400`: 缺少 `status`，`status` 非法，`checklist_id` 非法，或 `line_item_id` 非法
+- `404`: checklist 不存在，或 line item 不属于该 checklist
+- `500`: 更新 checklist line item status 失败，或读取更新后的 checklist 失败
+
 ### Delete Checklist
 
 `DELETE /api/v1/checklist/:checklist_id`

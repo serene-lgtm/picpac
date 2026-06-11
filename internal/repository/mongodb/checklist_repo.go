@@ -133,6 +133,28 @@ func (r *ChecklistRepository) Update(ctx context.Context, checklist *domain.Chec
 	return nil
 }
 
+// UpdateLineItemStatus updates a checklist line item status.
+func (r *ChecklistRepository) UpdateLineItemStatus(ctx context.Context, checklistID bson.ObjectID, lineItemID bson.ObjectID, status domain.LineItemStatus, updatedAt time.Time) error {
+	result, err := r.collection.UpdateOne(ctx, bson.M{
+		"_id":     checklistID,
+		"st":      bson.M{"$ne": domain.ChecklistStatusDeleted},
+		"itm._id": lineItemID,
+	}, bson.M{
+		"$set": bson.M{
+			"itm.$.st": status,
+			"uat":      updatedAt,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
+		return mongo.ErrNoDocuments
+	}
+
+	return nil
+}
+
 // DeleteByID logically deletes the checklist with the given ID.
 func (r *ChecklistRepository) DeleteByID(ctx context.Context, checklistID bson.ObjectID) error {
 	result, err := r.collection.UpdateOne(ctx, bson.M{
