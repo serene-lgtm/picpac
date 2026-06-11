@@ -58,6 +58,7 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 	checklistRoutes.PUT("/:checklist_id", checklistHandler.UpdateChecklist)
 	checklistRoutes.POST("/:checklist_id/items", checklistHandler.AddChecklistLineItems)
 	checklistRoutes.DELETE("/:checklist_id/items", checklistHandler.RemoveChecklistLineItems)
+	checklistRoutes.PATCH("/:checklist_id/items/:line_item_id/status", checklistHandler.UpdateChecklistLineItemStatus)
 	checklistRoutes.DELETE("/:checklist_id", checklistHandler.DeleteChecklist)
 }
 
@@ -76,7 +77,7 @@ func corsMiddleware(origins []string) gin.HandlerFunc {
 		if _, ok := allowedOrigins[origin]; ok {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Vary", "Origin")
-			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		}
 

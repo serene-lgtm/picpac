@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"pack_mate/internal/domain"
 
@@ -41,5 +42,6 @@ type ChecklistRepository interface {
 	SearchByKeywordAndUserID(ctx context.Context, userID bson.ObjectID, keyword string) ([]domain.Checklist, error)
 	GetByID(ctx context.Context, checklistID bson.ObjectID) (*domain.Checklist, error)
 	Update(ctx context.Context, checklist *domain.Checklist) error
+	UpdateLineItemStatus(ctx context.Context, checklistID bson.ObjectID, lineItemID bson.ObjectID, status domain.LineItemStatus, updatedAt time.Time) error
 	DeleteByID(ctx context.Context, checklistID bson.ObjectID) error
 }

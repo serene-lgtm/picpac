@@ -228,6 +228,47 @@ func (h *ChecklistHandler) RemoveChecklistLineItems(c *gin.Context) {
 	c.JSON(http.StatusOK, buildChecklistResponse(checklist))
 }
 
+// UpdateChecklistLineItemStatus handles checklist line item status update requests.
+func (h *ChecklistHandler) UpdateChecklistLineItemStatus(c *gin.Context) {
+	checklistID := strings.TrimSpace(c.Param("checklist_id"))
+	if checklistID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "checklist_id is required"})
+		return
+	}
+	if !validateRequiredObjectID(checklistID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "checklist_id is invalid"})
+		return
+	}
+
+	lineItemID := strings.TrimSpace(c.Param("line_item_id"))
+	if lineItemID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "line_item_id is required"})
+		return
+	}
+	if !validateRequiredObjectID(lineItemID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "line_item_id is invalid"})
+		return
+	}
+
+	var input request.UpdateChecklistLineItemStatusInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+		return
+	}
+	if strings.TrimSpace(input.Status) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "status is required"})
+		return
+	}
+
+	checklist, err := h.svc.UpdateChecklistLineItemStatus(c.Request.Context(), checklistID, lineItemID, input)
+	if err != nil {
+		respondChecklistError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, buildChecklistResponse(checklist))
+}
+
 // DeleteChecklist handles checklist deletion requests.
 func (h *ChecklistHandler) DeleteChecklist(c *gin.Context) {
 	checklistID := strings.TrimSpace(c.Param("checklist_id"))
@@ -258,6 +299,8 @@ func respondChecklistError(c *gin.Context, err error) {
 		strings.Contains(message, "checklist target_date is required"),
 		strings.Contains(message, "checklist line items are required"),
 		strings.Contains(message, "checklist line item ids are required"),
+		strings.Contains(message, "checklist line item status is required"),
+		strings.Contains(message, "checklist line item status is invalid"),
 		strings.Contains(message, "checklist line item reference item not found"),
 		strings.Contains(message, "checklist search keyword is required"),
 		strings.Contains(message, "checklist search keyword is too long"):
@@ -270,6 +313,7 @@ func respondChecklistError(c *gin.Context, err error) {
 		strings.Contains(message, "get checklist failed"),
 		strings.Contains(message, "get checklist line item reference item failed"),
 		strings.Contains(message, "update checklist failed"),
+		strings.Contains(message, "update checklist line item status failed"),
 		strings.Contains(message, "delete checklist failed"):
 		status = http.StatusInternalServerError
 	}

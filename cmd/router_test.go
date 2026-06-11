@@ -84,6 +84,10 @@ func (s *fakeChecklistService) RemoveChecklistLineItems(_ context.Context, _ str
 	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
 }
 
+func (s *fakeChecklistService) UpdateChecklistLineItemStatus(_ context.Context, _ string, _ string, _ request.UpdateChecklistLineItemStatusInput) (*domain.Checklist, error) {
+	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
+}
+
 func (s *fakeChecklistService) DeleteChecklist(_ context.Context, _ string) error {
 	return nil
 }
@@ -115,6 +119,7 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		{method: http.MethodPut, path: "/api/v1/checklist/" + bson.NewObjectID().Hex()},
 		{method: http.MethodPost, path: "/api/v1/checklist/" + bson.NewObjectID().Hex() + "/items"},
 		{method: http.MethodDelete, path: "/api/v1/checklist/" + bson.NewObjectID().Hex() + "/items"},
+		{method: http.MethodPatch, path: "/api/v1/checklist/" + bson.NewObjectID().Hex() + "/items/" + bson.NewObjectID().Hex() + "/status"},
 		{method: http.MethodDelete, path: "/api/v1/checklist/" + bson.NewObjectID().Hex()},
 	}
 

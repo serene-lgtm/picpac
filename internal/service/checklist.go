@@ -28,6 +28,7 @@ type ChecklistService interface {
 	UpdateChecklist(ctx context.Context, checklistID string, input request.UpdateChecklistInput) (*domain.Checklist, error)
 	AddChecklistLineItems(ctx context.Context, checklistID string, input request.AddChecklistLineItemsInput) (*domain.Checklist, error)
 	RemoveChecklistLineItems(ctx context.Context, checklistID string, input request.RemoveChecklistLineItemsInput) (*domain.Checklist, error)
+	UpdateChecklistLineItemStatus(ctx context.Context, checklistID string, lineItemID string, input request.UpdateChecklistLineItemStatusInput) (*domain.Checklist, error)
 	DeleteChecklist(ctx context.Context, checklistID string) error
 }
 
@@ -263,6 +264,40 @@ func (s *checklistService) RemoveChecklistLineItems(ctx context.Context, checkli
 	return checklist, nil
 }
 
+// UpdateChecklistLineItemStatus updates a single checklist line item status.
+func (s *checklistService) UpdateChecklistLineItemStatus(ctx context.Context, checklistID string, lineItemID string, input request.UpdateChecklistLineItemStatusInput) (*domain.Checklist, error) {
+	checklistObjectID, err := parseObjectID(checklistID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+	lineItemObjectID, err := parseObjectID(lineItemID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+
+	status, err := parseChecklistLineItemStatus(input.Status)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.repo.UpdateLineItemStatus(ctx, checklistObjectID, lineItemObjectID, status, time.Now().UTC()); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("checklist line item not found")
+		}
+		return nil, fmt.Errorf("update checklist line item status failed: %w", err)
+	}
+
+	checklist, err := s.repo.GetByID(ctx, checklistObjectID)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("checklist not found")
+		}
+		return nil, fmt.Errorf("get checklist failed: %w", err)
+	}
+
+	return checklist, nil
+}
+
 // DeleteChecklist logically deletes a checklist by ID.
 func (s *checklistService) DeleteChecklist(ctx context.Context, checklistID string) error {
 	objectID, err := parseObjectID(checklistID)
@@ -312,6 +347,19 @@ func parseChecklistTargetDate(value string) (time.Time, error) {
 	}
 
 	return targetDate, nil
+}
+
+func parseChecklistLineItemStatus(value string) (domain.LineItemStatus, error) {
+	status := domain.LineItemStatus(strings.TrimSpace(value))
+	if status == "" {
+		return "", fmt.Errorf("checklist line item status is required")
+	}
+	switch status {
+	case domain.LineItemStatusChecked, domain.LineItemStatusUnchecked:
+		return status, nil
+	default:
+		return "", fmt.Errorf("checklist line item status is invalid")
+	}
 }
 
 func (s *checklistService) newChecklistLineItems(ctx context.Context, inputs []request.ChecklistLineItemInput) ([]domain.LineItem, error) {

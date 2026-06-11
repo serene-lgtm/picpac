@@ -21,6 +21,9 @@ type fakeChecklistRepository struct {
 	searchKeyword string
 	got           *domain.Checklist
 	updated       *domain.Checklist
+	statusUpdated bool
+	status        domain.LineItemStatus
+	statusLineID  bson.ObjectID
 	deleted       bson.ObjectID
 	err           error
 	updateErr     error
@@ -89,6 +92,28 @@ func (r *fakeChecklistRepository) Update(_ context.Context, checklist *domain.Ch
 	}
 	r.updated = checklist
 	return nil
+}
+
+func (r *fakeChecklistRepository) UpdateLineItemStatus(_ context.Context, _ bson.ObjectID, lineItemID bson.ObjectID, status domain.LineItemStatus, updatedAt time.Time) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
+	if r.err != nil {
+		return r.err
+	}
+	r.statusUpdated = true
+	r.statusLineID = lineItemID
+	r.status = status
+	if r.got != nil {
+		r.got.UpdatedAt = updatedAt
+		for i := range r.got.Items {
+			if r.got.Items[i].ID == lineItemID {
+				r.got.Items[i].Status = status
+				return nil
+			}
+		}
+	}
+	return mongo.ErrNoDocuments
 }
 
 func (r *fakeChecklistRepository) DeleteByID(_ context.Context, checklistID bson.ObjectID) error {
@@ -479,6 +504,124 @@ func TestRemoveChecklistLineItemsRejectsMissingLineItem(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "checklist line item not found") {
 		t.Fatalf("expected line item not found, got %v", err)
+	}
+}
+
+func TestUpdateChecklistLineItemStatusChecksItem(t *testing.T) {
+	t.Parallel()
+
+	checklistID := bson.NewObjectID()
+	lineItemID := bson.NewObjectID()
+	repo := &fakeChecklistRepository{
+		got: &domain.Checklist{
+			ID: checklistID,
+			Items: []domain.LineItem{{
+				ID:            lineItemID,
+				ReferenceType: domain.LineItemTypeSnapshot,
+				Snapshot:      &domain.ItemSnapshot{Name: "护照"},
+				Status:        domain.LineItemStatusUnchecked,
+			}},
+			Status: domain.ChecklistStatusCreated,
+		},
+	}
+	svc := NewChecklistService(repo, validChecklistItemRepository())
+
+	checklist, err := svc.UpdateChecklistLineItemStatus(context.Background(), checklistID.Hex(), lineItemID.Hex(), request.UpdateChecklistLineItemStatusInput{
+		Status: string(domain.LineItemStatusChecked),
+	})
+	if err != nil {
+		t.Fatalf("UpdateChecklistLineItemStatus returned error: %v", err)
+	}
+	if !repo.statusUpdated || repo.statusLineID != lineItemID || repo.status != domain.LineItemStatusChecked {
+		t.Fatalf("expected repository status update, got statusUpdated=%v statusLineID=%s status=%s", repo.statusUpdated, repo.statusLineID.Hex(), repo.status)
+	}
+	if checklist.Items[0].Status != domain.LineItemStatusChecked {
+		t.Fatalf("expected checked status, got %+v", checklist.Items[0])
+	}
+}
+
+func TestUpdateChecklistLineItemStatusUnchecksItem(t *testing.T) {
+	t.Parallel()
+
+	checklistID := bson.NewObjectID()
+	lineItemID := bson.NewObjectID()
+	repo := &fakeChecklistRepository{
+		got: &domain.Checklist{
+			ID: checklistID,
+			Items: []domain.LineItem{{
+				ID:            lineItemID,
+				ReferenceType: domain.LineItemTypeSnapshot,
+				Snapshot:      &domain.ItemSnapshot{Name: "护照"},
+				Status:        domain.LineItemStatusChecked,
+			}},
+			Status: domain.ChecklistStatusCreated,
+		},
+	}
+	svc := NewChecklistService(repo, validChecklistItemRepository())
+
+	checklist, err := svc.UpdateChecklistLineItemStatus(context.Background(), checklistID.Hex(), lineItemID.Hex(), request.UpdateChecklistLineItemStatusInput{
+		Status: string(domain.LineItemStatusUnchecked),
+	})
+	if err != nil {
+		t.Fatalf("UpdateChecklistLineItemStatus returned error: %v", err)
+	}
+	if checklist.Items[0].Status != domain.LineItemStatusUnchecked {
+		t.Fatalf("expected unchecked status, got %+v", checklist.Items[0])
+	}
+}
+
+func TestUpdateChecklistLineItemStatusRejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
+
+	checklistID := bson.NewObjectID().Hex()
+	lineItemID := bson.NewObjectID().Hex()
+	svc := NewChecklistService(&fakeChecklistRepository{}, validChecklistItemRepository())
+
+	tests := []struct {
+		checklistID string
+		lineItemID  string
+		status      string
+	}{
+		{checklistID: "bad-checklist-id", lineItemID: lineItemID, status: string(domain.LineItemStatusChecked)},
+		{checklistID: checklistID, lineItemID: "bad-line-item-id", status: string(domain.LineItemStatusChecked)},
+		{checklistID: checklistID, lineItemID: lineItemID, status: ""},
+		{checklistID: checklistID, lineItemID: lineItemID, status: "done"},
+	}
+
+	for _, test := range tests {
+		_, err := svc.UpdateChecklistLineItemStatus(context.Background(), test.checklistID, test.lineItemID, request.UpdateChecklistLineItemStatusInput{Status: test.status})
+		if err == nil {
+			t.Fatalf("expected error for input %+v", test)
+		}
+	}
+}
+
+func TestUpdateChecklistLineItemStatusMapsMissingLineItem(t *testing.T) {
+	t.Parallel()
+
+	svc := NewChecklistService(&fakeChecklistRepository{got: &domain.Checklist{}}, validChecklistItemRepository())
+
+	_, err := svc.UpdateChecklistLineItemStatus(context.Background(), bson.NewObjectID().Hex(), bson.NewObjectID().Hex(), request.UpdateChecklistLineItemStatusInput{
+		Status: string(domain.LineItemStatusChecked),
+	})
+	if err == nil || !strings.Contains(err.Error(), "checklist line item not found") {
+		t.Fatalf("expected line item not found, got %v", err)
+	}
+}
+
+func TestUpdateChecklistLineItemStatusWrapsRepositoryFailure(t *testing.T) {
+	t.Parallel()
+
+	svc := NewChecklistService(&fakeChecklistRepository{
+		got:       &domain.Checklist{},
+		updateErr: errors.New("database down"),
+	}, validChecklistItemRepository())
+
+	_, err := svc.UpdateChecklistLineItemStatus(context.Background(), bson.NewObjectID().Hex(), bson.NewObjectID().Hex(), request.UpdateChecklistLineItemStatusInput{
+		Status: string(domain.LineItemStatusChecked),
+	})
+	if err == nil || !strings.Contains(err.Error(), "update checklist line item status failed") {
+		t.Fatalf("expected update status failure, got %v", err)
 	}
 }
 

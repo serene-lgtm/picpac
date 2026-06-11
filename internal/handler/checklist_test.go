@@ -69,6 +69,13 @@ func (s *fakeChecklistService) RemoveChecklistLineItems(_ context.Context, _ str
 	return s.defaultChecklist(), nil
 }
 
+func (s *fakeChecklistService) UpdateChecklistLineItemStatus(_ context.Context, _ string, _ string, _ request.UpdateChecklistLineItemStatusInput) (*domain.Checklist, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.defaultChecklist(), nil
+}
+
 func (s *fakeChecklistService) DeleteChecklist(_ context.Context, _ string) error {
 	return s.err
 }
@@ -284,6 +291,65 @@ func TestRemoveChecklistLineItemsHandlerReturnsChecklist(t *testing.T) {
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+}
+
+func TestUpdateChecklistLineItemStatusHandlerReturnsChecklist(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	checklistHandler := NewChecklistHandler(&fakeChecklistService{})
+	router.PATCH("/api/v1/checklist/:checklist_id/items/:line_item_id/status", checklistHandler.UpdateChecklistLineItemStatus)
+
+	body := bytes.NewBufferString(`{"status":"checked"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/checklist/"+bson.NewObjectID().Hex()+"/items/"+bson.NewObjectID().Hex()+"/status", body)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `"items"`) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestUpdateChecklistLineItemStatusHandlerRejectsMissingStatus(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	checklistHandler := NewChecklistHandler(&fakeChecklistService{})
+	router.PATCH("/api/v1/checklist/:checklist_id/items/:line_item_id/status", checklistHandler.UpdateChecklistLineItemStatus)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/checklist/"+bson.NewObjectID().Hex()+"/items/"+bson.NewObjectID().Hex()+"/status", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+}
+
+func TestUpdateChecklistLineItemStatusHandlerMapsNotFound(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	checklistHandler := NewChecklistHandler(&fakeChecklistService{err: errors.New("checklist line item not found")})
+	router.PATCH("/api/v1/checklist/:checklist_id/items/:line_item_id/status", checklistHandler.UpdateChecklistLineItemStatus)
+
+	body := bytes.NewBufferString(`{"status":"checked"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/checklist/"+bson.NewObjectID().Hex()+"/items/"+bson.NewObjectID().Hex()+"/status", body)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", recorder.Code)
 	}
 }
 
