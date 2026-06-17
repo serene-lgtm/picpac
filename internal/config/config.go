@@ -14,6 +14,7 @@ type Configuration struct {
 	Dashscope DashscopeConfig `json:"dashscope"`
 	CORS      CORSConfig      `json:"cors"`
 	Mongo     MongoConfig     `json:"mongo"`
+	Auth      AuthConfig      `json:"auth"`
 }
 
 // ServerConfig defines HTTP server settings.
@@ -45,6 +46,24 @@ type MongoConfig struct {
 	Database              string `json:"database"`
 	ConnectTimeoutSeconds int    `json:"connect_timeout_seconds"`
 	MaxPoolSize           uint64 `json:"max_pool_size"`
+}
+
+// AuthConfig defines authentication settings.
+type AuthConfig struct {
+	AccessTokenSecret      string          `json:"access_token_secret"`
+	AccessTokenTTLSeconds  int             `json:"access_token_ttl_seconds"`
+	RefreshTokenTTLSeconds int             `json:"refresh_token_ttl_seconds"`
+	PhoneCode              PhoneCodeConfig `json:"phone_code"`
+}
+
+// PhoneCodeConfig defines phone verification code settings.
+type PhoneCodeConfig struct {
+	TTLSeconds            int    `json:"ttl_seconds"`
+	MaxAttempts           int    `json:"max_attempts"`
+	ResendIntervalSeconds int    `json:"resend_interval_seconds"`
+	DailySendLimit        int    `json:"daily_send_limit"`
+	UseDevFixedCode       bool   `json:"use_dev_fixed_code"`
+	DevFixedCode          string `json:"dev_fixed_code"`
 }
 
 // Load reads and validates application configuration from a JSON file.
@@ -88,6 +107,30 @@ func validate(cfg *Configuration) error {
 
 	if cfg.Mongo.ConnectTimeoutSeconds <= 0 {
 		cfg.Mongo.ConnectTimeoutSeconds = 10
+	}
+	if strings.TrimSpace(cfg.Auth.AccessTokenSecret) == "" {
+		return fmt.Errorf("invalid config: auth.access_token_secret is required")
+	}
+	if cfg.Auth.AccessTokenTTLSeconds <= 0 {
+		cfg.Auth.AccessTokenTTLSeconds = 7200
+	}
+	if cfg.Auth.RefreshTokenTTLSeconds <= 0 {
+		cfg.Auth.RefreshTokenTTLSeconds = 2592000
+	}
+	if cfg.Auth.PhoneCode.TTLSeconds <= 0 {
+		cfg.Auth.PhoneCode.TTLSeconds = 300
+	}
+	if cfg.Auth.PhoneCode.MaxAttempts <= 0 {
+		cfg.Auth.PhoneCode.MaxAttempts = 5
+	}
+	if cfg.Auth.PhoneCode.ResendIntervalSeconds <= 0 {
+		cfg.Auth.PhoneCode.ResendIntervalSeconds = 60
+	}
+	if cfg.Auth.PhoneCode.DailySendLimit <= 0 {
+		cfg.Auth.PhoneCode.DailySendLimit = 10
+	}
+	if cfg.Auth.PhoneCode.UseDevFixedCode && strings.TrimSpace(cfg.Auth.PhoneCode.DevFixedCode) == "" {
+		return fmt.Errorf("invalid config: auth.phone_code.dev_fixed_code is required when use_dev_fixed_code is true")
 	}
 
 	return nil

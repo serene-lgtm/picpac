@@ -17,6 +17,171 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 ## Formal APIs
 
+### Send Phone Code
+
+`POST /api/v1/auth/phone/code`
+
+用途：
+- 发送手机号登录验证码
+- 当前开发配置可使用固定验证码，生产环境必须接真实短信服务
+- 同一手机号会受到重发间隔和每日发送次数限制
+
+请求类型：
+- `application/json`
+
+请求字段：
+- `phone`: string，必填。中国大陆11位手机号会标准化为 `+86` 格式；也支持传入带 `+` 的国际号码
+
+请求示例：
+
+```json
+{
+  "phone": "13800138000"
+}
+```
+
+成功响应：
+
+```json
+{
+  "sent": true
+}
+```
+
+失败响应：
+- `400`: 缺少 `phone`，或手机号格式非法
+- `429`: 验证码发送过于频繁
+- `500`: 创建验证码或发送验证码失败
+
+### Phone Login
+
+`POST /api/v1/auth/phone/login`
+
+用途：
+- 使用手机号和验证码登录
+- 首次手机号登录会自动创建 `User` 和 `AuthIdentity(provider=phone)`
+- 已存在手机号会复用原 User
+
+请求类型：
+- `application/json`
+
+请求字段：
+- `phone`: string，必填
+- `code`: string，必填
+
+请求示例：
+
+```json
+{
+  "phone": "13800138000",
+  "code": "123456"
+}
+```
+
+成功响应：
+
+```json
+{
+  "access_token": "...",
+  "refresh_token": "...",
+  "user": {
+    "id": "6821c0c1f1b2f4d5a6b7c8d1",
+    "display_name": "用户8000",
+    "avatar_url": "",
+    "status": "created"
+  }
+}
+```
+
+失败响应：
+- `400`: 缺少 `phone`、缺少 `code`、手机号格式非法、验证码非法或超过尝试次数
+- `404`: 已绑定身份对应的 User 不存在
+- `409`: 创建登录身份发生冲突且无法恢复
+- `500`: 创建 User、AuthIdentity 或 token 失败
+
+### Refresh Auth Token
+
+`POST /api/v1/auth/refresh`
+
+用途：
+- 使用 refresh token 换取新的 access token
+- refresh token 保持不变，直到过期或 logout 后才失效
+- refresh token 会存 hash，明文 token 只返回给客户端
+
+请求类型：
+- `application/json`
+
+请求字段：
+- `refresh_token`: string，必填
+
+成功响应：
+
+```json
+{
+  "access_token": "..."
+}
+```
+
+失败响应：
+- `400`: 缺少 `refresh_token`
+- `401`: refresh token 非法、过期或已被 revoke
+- `404`: User 不存在
+- `500`: 查询 refresh token 或创建新 access token 失败
+
+### Logout
+
+`POST /api/v1/auth/logout`
+
+用途：
+- 废弃 refresh token
+- access token 当前不落库，logout 后已签发的 access token 会自然过期
+
+请求类型：
+- `application/json`
+
+请求字段：
+- `refresh_token`: string，必填
+
+成功响应：
+
+```json
+{
+  "logged_out": true
+}
+```
+
+失败响应：
+- `400`: 缺少 `refresh_token`
+- `401`: refresh token 非法
+- `500`: revoke refresh token 失败
+
+### Me
+
+`GET /api/v1/me`
+
+用途：
+- 读取当前登录用户
+- 需要在请求头传入 access token
+
+请求头：
+- `Authorization: Bearer <access_token>`
+
+成功响应：
+
+```json
+{
+  "id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "display_name": "用户8000",
+  "avatar_url": "",
+  "status": "created"
+}
+```
+
+失败响应：
+- `401`: 缺少 access token，access token 非法或已过期
+- `404`: User 不存在
+- `500`: 查询 User 失败
+
 ### Create Item
 
 `POST /api/v1/item`

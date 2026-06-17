@@ -9,6 +9,7 @@ import (
 
 	"pack_mate/internal/domain"
 	"pack_mate/internal/dto/request"
+	"pack_mate/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -92,12 +93,52 @@ func (s *fakeChecklistService) DeleteChecklist(_ context.Context, _ string) erro
 	return nil
 }
 
+type fakeAuthService struct{}
+
+func (s *fakeAuthService) SendPhoneCode(_ context.Context, _ request.SendPhoneCodeInput) error {
+	return nil
+}
+
+func (s *fakeAuthService) LoginWithPhone(_ context.Context, _ request.PhoneLoginInput) (*service.AuthResult, error) {
+	return &service.AuthResult{AccessToken: "access", RefreshToken: "refresh", User: &domain.User{ID: bson.NewObjectID(), DisplayName: "user", Status: domain.UserStatusCreated}}, nil
+}
+
+func (s *fakeAuthService) Refresh(_ context.Context, _ request.RefreshTokenInput) (*service.RefreshResult, error) {
+	return &service.RefreshResult{AccessToken: "access"}, nil
+}
+
+func (s *fakeAuthService) Logout(_ context.Context, _ request.LogoutInput) error {
+	return nil
+}
+
+func (s *fakeAuthService) Me(_ context.Context, _ string) (*domain.User, error) {
+	return &domain.User{ID: bson.NewObjectID(), DisplayName: "user", Status: domain.UserStatusCreated}, nil
+}
+
+type fakeTokenService struct{}
+
+func (s *fakeTokenService) CreateAccessToken(_ bson.ObjectID) (string, error) {
+	return "access", nil
+}
+
+func (s *fakeTokenService) ParseAccessToken(_ string) (bson.ObjectID, error) {
+	return bson.NewObjectID(), nil
+}
+
+func (s *fakeTokenService) CreateRefreshToken() (string, string, error) {
+	return "refresh", "hash", nil
+}
+
+func (s *fakeTokenService) HashToken(_ string) string {
+	return "hash"
+}
+
 func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{})
+	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeAuthService{}, &fakeTokenService{})
 
 	tests := []struct {
 		method string
@@ -121,6 +162,11 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		{method: http.MethodDelete, path: "/api/v1/checklist/" + bson.NewObjectID().Hex() + "/items"},
 		{method: http.MethodPatch, path: "/api/v1/checklist/" + bson.NewObjectID().Hex() + "/items/" + bson.NewObjectID().Hex() + "/status"},
 		{method: http.MethodDelete, path: "/api/v1/checklist/" + bson.NewObjectID().Hex()},
+		{method: http.MethodPost, path: "/api/v1/auth/phone/code"},
+		{method: http.MethodPost, path: "/api/v1/auth/phone/login"},
+		{method: http.MethodPost, path: "/api/v1/auth/refresh"},
+		{method: http.MethodPost, path: "/api/v1/auth/logout"},
+		{method: http.MethodGet, path: "/api/v1/me"},
 	}
 
 	for _, test := range tests {
