@@ -17,6 +17,19 @@
     "connect_timeout_seconds": 10,
     "max_pool_size": 20
   },
+  "auth": {
+    "access_token_secret": "dev-only-change-me",
+    "access_token_ttl_seconds": 7200,
+    "refresh_token_ttl_seconds": 2592000,
+    "phone_code": {
+      "ttl_seconds": 300,
+      "max_attempts": 5,
+      "resend_interval_seconds": 60,
+      "daily_send_limit": 10,
+      "use_dev_fixed_code": true,
+      "dev_fixed_code": "123456"
+    }
+  },
   "cors": {
     "allowed_origins": [
       "http://localhost:54771",

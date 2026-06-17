@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"pack_mate/internal/config"
 	"pack_mate/internal/handler"
@@ -22,20 +23,35 @@ func newRouter(cfg *config.Configuration, client *cos.Client, bucketURL *url.URL
 	itemRepo := mongodb.NewItemRepository(db)
 	packRepo := mongodb.NewPackRepository(db)
 	checklistRepo := mongodb.NewChecklistRepository(db)
+	userRepo := mongodb.NewUserRepository(db)
+	authIdentityRepo := mongodb.NewAuthIdentityRepository(db)
+	phoneCodeRepo := mongodb.NewPhoneVerificationCodeRepository(db)
+	refreshTokenRepo := mongodb.NewRefreshTokenRepository(db)
 	uploadService := service.NewCOSUploadService(client, bucketURL)
+	tokenService := service.NewTokenService(cfg.Auth.AccessTokenSecret, time.Duration(cfg.Auth.AccessTokenTTLSeconds)*time.Second)
 	itemService := service.NewItemService(itemRepo, uploadService)
 	packService := service.NewPackService(packRepo)
 	checklistService := service.NewChecklistService(checklistRepo, itemRepo)
+	authService := service.NewAuthService(userRepo, authIdentityRepo, phoneCodeRepo, refreshTokenRepo, service.NewFakeSMSService(), tokenService, cfg.Auth)
 
-	registerAPIRoutes(router, itemService, packService, checklistService)
+	registerAPIRoutes(router, itemService, packService, checklistService, authService, tokenService)
 
 	return router
 }
 
-func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService, checklistService service.ChecklistService) {
+func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService, checklistService service.ChecklistService, authService service.AuthService, tokenService service.TokenService) {
 	itemHandler := handler.NewItemHandler(itemService)
 	packHandler := handler.NewPackHandler(packService)
 	checklistHandler := handler.NewChecklistHandler(checklistService)
+	authHandler := handler.NewAuthHandler(authService)
+	authMiddleware := handler.NewAuthMiddleware(tokenService)
+
+	authRoutes := router.Group("/api/v1/auth")
+	authRoutes.POST("/phone/code", authHandler.SendPhoneCode)
+	authRoutes.POST("/phone/login", authHandler.LoginWithPhone)
+	authRoutes.POST("/refresh", authHandler.Refresh)
+	authRoutes.POST("/logout", authHandler.Logout)
+	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
 
 	itemRoutes := router.Group("/api/v1/item")
 	itemRoutes.POST("", itemHandler.CreateItem)
