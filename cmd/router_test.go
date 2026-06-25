@@ -25,15 +25,15 @@ func (s *fakeItemService) ListItems(_ context.Context, _ request.ListItemsInput)
 	return []domain.Item{}, nil
 }
 
-func (s *fakeItemService) GetItem(_ context.Context, _ string) (*domain.Item, error) {
+func (s *fakeItemService) GetItem(_ context.Context, _ string, _ string) (*domain.Item, error) {
 	return &domain.Item{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "item"}, nil
 }
 
-func (s *fakeItemService) UpdateItem(_ context.Context, _ string, _ request.UpdateItemInput) (*domain.Item, error) {
+func (s *fakeItemService) UpdateItem(_ context.Context, _ string, _ string, _ request.UpdateItemInput) (*domain.Item, error) {
 	return &domain.Item{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "item"}, nil
 }
 
-func (s *fakeItemService) DeleteItem(_ context.Context, _ string) error {
+func (s *fakeItemService) DeleteItem(_ context.Context, _ string, _ string) error {
 	return nil
 }
 
@@ -47,15 +47,15 @@ func (s *fakePackService) ListPacks(_ context.Context, _ request.ListPacksInput)
 	return []domain.Pack{}, nil
 }
 
-func (s *fakePackService) GetPack(_ context.Context, _ string) (*domain.Pack, error) {
+func (s *fakePackService) GetPack(_ context.Context, _ string, _ string) (*domain.Pack, error) {
 	return &domain.Pack{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "pack"}, nil
 }
 
-func (s *fakePackService) UpdatePack(_ context.Context, _ string, _ request.UpdatePackInput) (*domain.Pack, error) {
+func (s *fakePackService) UpdatePack(_ context.Context, _ string, _ string, _ request.UpdatePackInput) (*domain.Pack, error) {
 	return &domain.Pack{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "pack"}, nil
 }
 
-func (s *fakePackService) DeletePack(_ context.Context, _ string) error {
+func (s *fakePackService) DeletePack(_ context.Context, _ string, _ string) error {
 	return nil
 }
 
@@ -69,27 +69,27 @@ func (s *fakeChecklistService) ListChecklists(_ context.Context, _ request.ListC
 	return []domain.Checklist{}, nil
 }
 
-func (s *fakeChecklistService) GetChecklist(_ context.Context, _ string) (*domain.Checklist, error) {
+func (s *fakeChecklistService) GetChecklist(_ context.Context, _ string, _ string) (*domain.Checklist, error) {
 	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
 }
 
-func (s *fakeChecklistService) UpdateChecklist(_ context.Context, _ string, _ request.UpdateChecklistInput) (*domain.Checklist, error) {
+func (s *fakeChecklistService) UpdateChecklist(_ context.Context, _ string, _ string, _ request.UpdateChecklistInput) (*domain.Checklist, error) {
 	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
 }
 
-func (s *fakeChecklistService) AddChecklistLineItems(_ context.Context, _ string, _ request.AddChecklistLineItemsInput) (*domain.Checklist, error) {
+func (s *fakeChecklistService) AddChecklistLineItems(_ context.Context, _ string, _ string, _ request.AddChecklistLineItemsInput) (*domain.Checklist, error) {
 	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
 }
 
-func (s *fakeChecklistService) RemoveChecklistLineItems(_ context.Context, _ string, _ request.RemoveChecklistLineItemsInput) (*domain.Checklist, error) {
+func (s *fakeChecklistService) RemoveChecklistLineItems(_ context.Context, _ string, _ string, _ request.RemoveChecklistLineItemsInput) (*domain.Checklist, error) {
 	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
 }
 
-func (s *fakeChecklistService) UpdateChecklistLineItemStatus(_ context.Context, _ string, _ string, _ request.UpdateChecklistLineItemStatusInput) (*domain.Checklist, error) {
+func (s *fakeChecklistService) UpdateChecklistLineItemStatus(_ context.Context, _ string, _ string, _ string, _ request.UpdateChecklistLineItemStatusInput) (*domain.Checklist, error) {
 	return &domain.Checklist{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "checklist"}, nil
 }
 
-func (s *fakeChecklistService) DeleteChecklist(_ context.Context, _ string) error {
+func (s *fakeChecklistService) DeleteChecklist(_ context.Context, _ string, _ string) error {
 	return nil
 }
 

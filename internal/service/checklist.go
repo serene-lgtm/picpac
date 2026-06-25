@@ -24,12 +24,12 @@ const checklistTargetDateLayout = "2006-01-02"
 type ChecklistService interface {
 	CreateChecklist(ctx context.Context, input request.CreateChecklistInput) (*domain.Checklist, error)
 	ListChecklists(ctx context.Context, input request.ListChecklistsInput) ([]domain.Checklist, error)
-	GetChecklist(ctx context.Context, checklistID string) (*domain.Checklist, error)
-	UpdateChecklist(ctx context.Context, checklistID string, input request.UpdateChecklistInput) (*domain.Checklist, error)
-	AddChecklistLineItems(ctx context.Context, checklistID string, input request.AddChecklistLineItemsInput) (*domain.Checklist, error)
-	RemoveChecklistLineItems(ctx context.Context, checklistID string, input request.RemoveChecklistLineItemsInput) (*domain.Checklist, error)
-	UpdateChecklistLineItemStatus(ctx context.Context, checklistID string, lineItemID string, input request.UpdateChecklistLineItemStatusInput) (*domain.Checklist, error)
-	DeleteChecklist(ctx context.Context, checklistID string) error
+	GetChecklist(ctx context.Context, checklistID string, userID string) (*domain.Checklist, error)
+	UpdateChecklist(ctx context.Context, checklistID string, userID string, input request.UpdateChecklistInput) (*domain.Checklist, error)
+	AddChecklistLineItems(ctx context.Context, checklistID string, userID string, input request.AddChecklistLineItemsInput) (*domain.Checklist, error)
+	RemoveChecklistLineItems(ctx context.Context, checklistID string, userID string, input request.RemoveChecklistLineItemsInput) (*domain.Checklist, error)
+	UpdateChecklistLineItemStatus(ctx context.Context, checklistID string, lineItemID string, userID string, input request.UpdateChecklistLineItemStatusInput) (*domain.Checklist, error)
+	DeleteChecklist(ctx context.Context, checklistID string, userID string) error
 }
 
 type checklistService struct {
@@ -44,8 +44,7 @@ func NewChecklistService(repo repository.ChecklistRepository, itemRepo repositor
 
 // CreateChecklist creates a new checklist.
 func (s *checklistService) CreateChecklist(ctx context.Context, input request.CreateChecklistInput) (*domain.Checklist, error) {
-	// TODO: Read and verify checklist owner from auth context after user accounts are implemented.
-	userID, err := parseOptionalObjectID(input.UserID)
+	userID, err := parseObjectID(input.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid input")
 	}
@@ -60,7 +59,7 @@ func (s *checklistService) CreateChecklist(ctx context.Context, input request.Cr
 		return nil, err
 	}
 
-	items, err := s.newChecklistLineItems(ctx, input.Items)
+	items, err := s.newChecklistLineItems(ctx, userID, input.Items)
 	if err != nil {
 		return nil, err
 	}
@@ -104,11 +103,6 @@ func (s *checklistService) ListChecklists(ctx context.Context, input request.Lis
 }
 
 func (s *checklistService) listChecklists(ctx context.Context, userID string) ([]domain.Checklist, error) {
-	// TODO: Filter by authenticated user after user accounts/auth are implemented.
-	if strings.TrimSpace(userID) == "" {
-		return s.repo.ListAll(ctx)
-	}
-
 	objectID, err := parseObjectID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid input")
@@ -118,17 +112,12 @@ func (s *checklistService) listChecklists(ctx context.Context, userID string) ([
 }
 
 func (s *checklistService) searchChecklistsByKeyword(ctx context.Context, userID string, keyword string) ([]domain.Checklist, error) {
-	// TODO: Filter by authenticated user after user accounts/auth are implemented.
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
 		return nil, fmt.Errorf("checklist search keyword is required")
 	}
 	if utf8.RuneCountInString(keyword) > maxChecklistSearchKeywordRunes {
 		return nil, fmt.Errorf("checklist search keyword is too long")
-	}
-
-	if strings.TrimSpace(userID) == "" {
-		return s.repo.SearchByKeyword(ctx, keyword)
 	}
 
 	objectID, err := parseObjectID(userID)
@@ -140,42 +129,15 @@ func (s *checklistService) searchChecklistsByKeyword(ctx context.Context, userID
 }
 
 // GetChecklist gets a single checklist by ID.
-func (s *checklistService) GetChecklist(ctx context.Context, checklistID string) (*domain.Checklist, error) {
-	objectID, err := parseObjectID(checklistID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid input")
-	}
-
-	checklist, err := s.repo.GetByID(ctx, objectID)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, fmt.Errorf("checklist not found")
-		}
-		return nil, fmt.Errorf("get checklist failed: %w", err)
-	}
-	if checklist.Status == domain.ChecklistStatusDeleted {
-		return nil, fmt.Errorf("checklist not found")
-	}
-
-	return checklist, nil
+func (s *checklistService) GetChecklist(ctx context.Context, checklistID string, userID string) (*domain.Checklist, error) {
+	return s.getOwnedChecklist(ctx, checklistID, userID)
 }
 
 // UpdateChecklist updates checklist metadata.
-func (s *checklistService) UpdateChecklist(ctx context.Context, checklistID string, input request.UpdateChecklistInput) (*domain.Checklist, error) {
-	objectID, err := parseObjectID(checklistID)
+func (s *checklistService) UpdateChecklist(ctx context.Context, checklistID string, userID string, input request.UpdateChecklistInput) (*domain.Checklist, error) {
+	checklist, err := s.getEditableChecklist(ctx, checklistID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid input")
-	}
-
-	checklist, err := s.repo.GetByID(ctx, objectID)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, fmt.Errorf("checklist not found")
-		}
-		return nil, fmt.Errorf("get checklist failed: %w", err)
-	}
-	if checklist.Status == domain.ChecklistStatusDeleted {
-		return nil, fmt.Errorf("checklist not found")
+		return nil, err
 	}
 
 	name := strings.TrimSpace(input.Name)
@@ -204,8 +166,8 @@ func (s *checklistService) UpdateChecklist(ctx context.Context, checklistID stri
 }
 
 // AddChecklistLineItems adds line items to an existing checklist.
-func (s *checklistService) AddChecklistLineItems(ctx context.Context, checklistID string, input request.AddChecklistLineItemsInput) (*domain.Checklist, error) {
-	checklist, err := s.getEditableChecklist(ctx, checklistID)
+func (s *checklistService) AddChecklistLineItems(ctx context.Context, checklistID string, userID string, input request.AddChecklistLineItemsInput) (*domain.Checklist, error) {
+	checklist, err := s.getEditableChecklist(ctx, checklistID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +175,7 @@ func (s *checklistService) AddChecklistLineItems(ctx context.Context, checklistI
 		return nil, fmt.Errorf("checklist line items are required")
 	}
 
-	items, err := s.newChecklistLineItems(ctx, input.Items)
+	items, err := s.newChecklistLineItems(ctx, checklist.UserID, input.Items)
 	if err != nil {
 		return nil, err
 	}
@@ -232,8 +194,8 @@ func (s *checklistService) AddChecklistLineItems(ctx context.Context, checklistI
 }
 
 // RemoveChecklistLineItems removes line items from an existing checklist.
-func (s *checklistService) RemoveChecklistLineItems(ctx context.Context, checklistID string, input request.RemoveChecklistLineItemsInput) (*domain.Checklist, error) {
-	checklist, err := s.getEditableChecklist(ctx, checklistID)
+func (s *checklistService) RemoveChecklistLineItems(ctx context.Context, checklistID string, userID string, input request.RemoveChecklistLineItemsInput) (*domain.Checklist, error) {
+	checklist, err := s.getEditableChecklist(ctx, checklistID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +227,7 @@ func (s *checklistService) RemoveChecklistLineItems(ctx context.Context, checkli
 }
 
 // UpdateChecklistLineItemStatus updates a single checklist line item status.
-func (s *checklistService) UpdateChecklistLineItemStatus(ctx context.Context, checklistID string, lineItemID string, input request.UpdateChecklistLineItemStatusInput) (*domain.Checklist, error) {
+func (s *checklistService) UpdateChecklistLineItemStatus(ctx context.Context, checklistID string, lineItemID string, userID string, input request.UpdateChecklistLineItemStatusInput) (*domain.Checklist, error) {
 	checklistObjectID, err := parseObjectID(checklistID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid input")
@@ -277,6 +239,9 @@ func (s *checklistService) UpdateChecklistLineItemStatus(ctx context.Context, ch
 
 	status, err := parseChecklistLineItemStatus(input.Status)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := s.getEditableChecklist(ctx, checklistID, userID); err != nil {
 		return nil, err
 	}
 
@@ -299,10 +264,13 @@ func (s *checklistService) UpdateChecklistLineItemStatus(ctx context.Context, ch
 }
 
 // DeleteChecklist logically deletes a checklist by ID.
-func (s *checklistService) DeleteChecklist(ctx context.Context, checklistID string) error {
+func (s *checklistService) DeleteChecklist(ctx context.Context, checklistID string, userID string) error {
 	objectID, err := parseObjectID(checklistID)
 	if err != nil {
 		return fmt.Errorf("invalid input")
+	}
+	if _, err := s.getEditableChecklist(ctx, checklistID, userID); err != nil {
+		return err
 	}
 
 	if err := s.repo.DeleteByID(ctx, objectID); err != nil {
@@ -315,8 +283,12 @@ func (s *checklistService) DeleteChecklist(ctx context.Context, checklistID stri
 	return nil
 }
 
-func (s *checklistService) getEditableChecklist(ctx context.Context, checklistID string) (*domain.Checklist, error) {
+func (s *checklistService) getOwnedChecklist(ctx context.Context, checklistID string, userID string) (*domain.Checklist, error) {
 	objectID, err := parseObjectID(checklistID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+	currentUserID, err := parseObjectID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid input")
 	}
@@ -328,11 +300,15 @@ func (s *checklistService) getEditableChecklist(ctx context.Context, checklistID
 		}
 		return nil, fmt.Errorf("get checklist failed: %w", err)
 	}
-	if checklist.Status == domain.ChecklistStatusDeleted {
+	if checklist.Status == domain.ChecklistStatusDeleted || checklist.UserID != currentUserID {
 		return nil, fmt.Errorf("checklist not found")
 	}
 
 	return checklist, nil
+}
+
+func (s *checklistService) getEditableChecklist(ctx context.Context, checklistID string, userID string) (*domain.Checklist, error) {
+	return s.getOwnedChecklist(ctx, checklistID, userID)
 }
 
 func parseChecklistTargetDate(value string) (time.Time, error) {
@@ -362,14 +338,14 @@ func parseChecklistLineItemStatus(value string) (domain.LineItemStatus, error) {
 	}
 }
 
-func (s *checklistService) newChecklistLineItems(ctx context.Context, inputs []request.ChecklistLineItemInput) ([]domain.LineItem, error) {
+func (s *checklistService) newChecklistLineItems(ctx context.Context, userID bson.ObjectID, inputs []request.ChecklistLineItemInput) ([]domain.LineItem, error) {
 	if len(inputs) == 0 {
 		return []domain.LineItem{}, nil
 	}
 
 	items := make([]domain.LineItem, 0, len(inputs))
 	for _, input := range inputs {
-		lineItem, err := s.newChecklistLineItem(ctx, input)
+		lineItem, err := s.newChecklistLineItem(ctx, userID, input)
 		if err != nil {
 			return nil, err
 		}
@@ -379,7 +355,7 @@ func (s *checklistService) newChecklistLineItems(ctx context.Context, inputs []r
 	return items, nil
 }
 
-func (s *checklistService) newChecklistLineItem(ctx context.Context, input request.ChecklistLineItemInput) (domain.LineItem, error) {
+func (s *checklistService) newChecklistLineItem(ctx context.Context, userID bson.ObjectID, input request.ChecklistLineItemInput) (domain.LineItem, error) {
 	referenceType := domain.LineItemType(strings.TrimSpace(input.ReferenceType))
 	referenceIDValue := strings.TrimSpace(input.ReferenceID)
 
@@ -398,7 +374,7 @@ func (s *checklistService) newChecklistLineItem(ctx context.Context, input reque
 		if err != nil {
 			return domain.LineItem{}, fmt.Errorf("invalid input")
 		}
-		if err := s.validateLineItemReferenceItem(ctx, referenceID); err != nil {
+		if err := s.validateLineItemReferenceItem(ctx, userID, referenceID); err != nil {
 			return domain.LineItem{}, err
 		}
 		lineItem.ReferenceID = referenceID
@@ -421,7 +397,7 @@ func (s *checklistService) newChecklistLineItem(ctx context.Context, input reque
 	return lineItem, nil
 }
 
-func (s *checklistService) validateLineItemReferenceItem(ctx context.Context, itemID bson.ObjectID) error {
+func (s *checklistService) validateLineItemReferenceItem(ctx context.Context, userID bson.ObjectID, itemID bson.ObjectID) error {
 	item, err := s.itemRepo.GetByID(ctx, itemID)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
@@ -429,7 +405,7 @@ func (s *checklistService) validateLineItemReferenceItem(ctx context.Context, it
 		}
 		return fmt.Errorf("get checklist line item reference item failed: %w", err)
 	}
-	if item.Status == domain.ItemStatusDeleted {
+	if item.Status == domain.ItemStatusDeleted || item.UserID != userID {
 		return fmt.Errorf("checklist line item reference item not found")
 	}
 

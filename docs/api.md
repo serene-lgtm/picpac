@@ -190,12 +190,13 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - 创建一个用户私有的 item
 - 如果上传图片，后端会先上传到腾讯云 COS，再把图片 URL 存入 MongoDB
 - 新创建的 item 会默认写入 `created` 状态
+- `user_id` 从当前登录用户读取，不接受前端显式传入
 
 请求类型：
 - `multipart/form-data`
+- 需要 `Authorization: Bearer <access_token>`
 
 请求字段：
-- `user_id`: string，可选。用户系统接入后会恢复为必填或从登录态获取
 - `name`: string，必填
 - `description`: string，可选
 - `image`: 文件，可选
@@ -216,7 +217,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```
 
 失败响应：
-- `400`: 缺少 `name`，`user_id` 非法，或上传文件不是有效图片
+- `400`: 缺少 `name`，或上传文件不是有效图片
+- `401`: access token 缺失、非法或过期
 - `502`: 图片上传失败
 - `500`: 创建 item 失败
 
@@ -226,13 +228,12 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 查询当前用户的全部 item
-- 当前阶段 `user_id` 可选；不传时返回全部未删除 item
 - 可通过 `q` 按 item name 或 description 做关键词子串匹配，主要用于中文 item 搜索
 - 默认按创建时间倒序返回
 - 已逻辑删除的 item 不会出现在列表中
 
 请求参数：
-- `user_id`: string，可选，放在 query string 中。用户系统接入后会恢复为必填或从登录态获取
+- 需要 `Authorization: Bearer <access_token>`
 - `q`: string，可选，按 item name 或 description 子串匹配；当前最大长度为 50 个字符，传空字符串会返回 `400`
 
 搜索示例：
@@ -273,7 +274,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```
 
 失败响应：
-- `400`: `user_id` 不是合法 ObjectID，或 `q` 为空/超过最大长度
+- `400`: `q` 为空/超过最大长度
+- `401`: access token 缺失、非法或过期
 - `500`: 查询 item 列表失败
 
 ### Get Item
@@ -282,10 +284,14 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 根据 `item_id` 读取单个 item 详情
+- 只允许读取当前登录用户自己的 item
 - 如果 item 已被逻辑删除，则按不存在处理
 
 路径参数：
 - `item_id`: string，必填，item 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
 
 成功响应：
 
@@ -304,6 +310,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 失败响应：
 - `400`: 缺少 `item_id`，或 `item_id` 不是合法 ObjectID
+- `401`: access token 缺失、非法或过期
 - `404`: item 不存在
 - `500`: 查询 item 失败
 
@@ -313,6 +320,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 更新单个 item 的名称、描述和可选图片
+- 只允许更新当前登录用户自己的 item
 - 如果上传新图片，会覆盖 `source_image_url`
 - 如果 item 已被逻辑删除，则不允许更新
 
@@ -321,6 +329,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 路径参数：
 - `item_id`: string，必填，item 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
 
 请求字段：
 - `name`: string，必填
@@ -344,6 +355,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 失败响应：
 - `400`: 缺少 `name`，`item_id` 非法，或上传文件不是有效图片
+- `401`: access token 缺失、非法或过期
 - `404`: item 不存在
 - `502`: 图片上传失败
 - `500`: 更新 item 失败
@@ -354,10 +366,14 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 逻辑删除单个 item
+- 只允许删除当前登录用户自己的 item
 - 删除后会把 `status` 置为 `deleted`，不会真的从 MongoDB 中移除
 
 路径参数：
 - `item_id`: string，必填，item 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
 
 成功响应：
 
@@ -369,6 +385,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 失败响应：
 - `400`: 缺少 `item_id`，或 `item_id` 不是合法 ObjectID
+- `401`: access token 缺失、非法或过期
 - `404`: item 不存在
 - `500`: 删除 item 失败
 
@@ -378,16 +395,16 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 创建一个用户的 pack，用于规划一次打包清单
-- `user_id` 当前阶段可选；用户系统接入后会恢复为必填或从登录态获取
-- `items` 当前只校验 ID 格式，不校验 item 是否属于当前用户；用户系统接入后会补充权限校验
+- `user_id` 从当前登录用户读取，不接受前端显式传入
+- `items` 中的每个 item 都必须存在、未删除且属于当前登录用户
 - 新创建的 pack 会默认写入 `created` 状态
 
 请求类型：
 - `application/json`
+- 需要 `Authorization: Bearer <access_token>`
 
 请求字段：
 - `name`: string，必填
-- `user_id`: string，可选。用户系统接入后会恢复为必填或从登录态获取
 - `description`: string，可选
 - `items`: string array，可选，item id 列表
 
@@ -396,7 +413,6 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```json
 {
   "name": "日本出差",
-  "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
   "description": "东京 5 天商务行程",
   "items": [
     "6821c0c1f1b2f4d5a6b7c8d9"
@@ -420,7 +436,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```
 
 失败响应：
-- `400`: 缺少 `name`，`user_id` 非法，或 `items` 中存在非法 item id
+- `400`: 缺少 `name`，或 `items` 中存在非法 item id
+- `401`: access token 缺失、非法或过期
+- `404`: `items` 中存在不属于当前用户、已删除或不存在的 item
 - `500`: 创建 pack 失败
 
 ### List Packs
@@ -429,14 +447,13 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 查询 pack 列表
-- 当前阶段 `user_id` 可选；不传时返回全部未删除 pack
 - 可通过 `q` 按 pack name 或 description 做关键词子串匹配，主要用于中文 pack 搜索
 - `status` 是内部状态，不支持作为 query 参数过滤
 - 默认按创建时间倒序返回
 - 已逻辑删除的 pack 不会出现在列表中
 
 请求参数：
-- `user_id`: string，可选，放在 query string 中。用户系统接入后会恢复为必填或从登录态获取
+- 需要 `Authorization: Bearer <access_token>`
 - `q`: string，可选，按 pack name 或 description 子串匹配；当前最大长度为 50 个字符，传空字符串会返回 `400`
 
 搜索示例：
@@ -476,7 +493,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```
 
 失败响应：
-- `400`: `user_id` 不是合法 ObjectID，或 `q` 为空/超过最大长度
+- `400`: `q` 为空/超过最大长度
+- `401`: access token 缺失、非法或过期
 - `500`: 查询 pack 列表失败
 
 ### Get Pack
@@ -485,11 +503,15 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 根据 `pack_id` 读取单个 pack 详情
+- 只允许读取当前登录用户自己的 pack
 - 如果 pack 已被逻辑删除，则按不存在处理
 - `status` 是内部状态，不支持作为 query 参数过滤
 
 路径参数：
 - `pack_id`: string，必填，pack 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
 
 成功响应：
 
@@ -508,6 +530,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 失败响应：
 - `400`: 缺少 `pack_id`，或 `pack_id` 不是合法 ObjectID
+- `401`: access token 缺失、非法或过期
 - `404`: pack 不存在
 - `500`: 查询 pack 失败
 
@@ -517,10 +540,12 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 更新单个 pack 的完整可编辑字段
+- 只允许更新当前登录用户自己的 pack
 - 前端提交更新后的 `name`、`description`、`items`
 - `name` 必填
 - `description` 传空字符串表示清空描述
 - `items` 传空数组表示清空 pack 内 item 列表
+- `items` 中的每个 item 都必须存在、未删除且属于当前登录用户
 - 后端会保留 `id`、`user_id`、`status`、`created_at` 等系统字段，并更新 `updated_at`
 - 如果 pack 已被逻辑删除，则不允许更新
 
@@ -529,6 +554,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 路径参数：
 - `pack_id`: string，必填，pack 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
 
 请求字段：
 - `name`: string，必填
@@ -564,7 +592,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 失败响应：
 - `400`: 缺少 `name`，`pack_id` 非法，或 `items` 中存在非法 item id
-- `404`: pack 不存在
+- `401`: access token 缺失、非法或过期
+- `404`: pack 不存在，或 `items` 中存在不属于当前用户、已删除或不存在的 item
 - `500`: 更新 pack 失败
 
 ### Delete Pack
@@ -573,10 +602,14 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 逻辑删除单个 pack
+- 只允许删除当前登录用户自己的 pack
 - 删除后会把 `status` 置为 `deleted`，不会真的从 MongoDB 中移除
 
 路径参数：
 - `pack_id`: string，必填，pack 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
 
 成功响应：
 
@@ -588,6 +621,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 失败响应：
 - `400`: 缺少 `pack_id`，或 `pack_id` 不是合法 ObjectID
+- `401`: access token 缺失、非法或过期
 - `404`: pack 不存在或已被逻辑删除
 - `500`: 删除 pack 失败
 
@@ -597,17 +631,18 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 创建一个 checklist
-- `user_id` 当前阶段可选；用户系统接入后会恢复为必填或从登录态获取
+- `user_id` 从当前登录用户读取，不接受前端显式传入
 - 新创建的 checklist 会默认写入 `created` 状态
 - `items` 是 line item 列表；如果 `reference_type` 是 `item`，`reference_id` 必须是 item id，且不能传 `snapshot`；如果 `reference_type` 是 `snapshot`，`reference_id` 必须为空，且必须传 `snapshot.name`
-- `reference_type` 是 `item` 时，后端会校验对应 item 存在且未被逻辑删除
+- `reference_type` 是 `item` 时，后端会校验对应 item 存在、未被逻辑删除且属于当前登录用户
 - line item 初始状态统一为 `unchecked`
+- 当前正式接口没有 `pack_id` 输入；如果前端是先从 pack 展开成 line items 再调用该接口，本次后端能校验的是展开后的 item owner，而不是原始 pack id
 
 请求类型：
 - `application/json`
+- 需要 `Authorization: Bearer <access_token>`
 
 请求字段：
-- `user_id`: string，可选。用户系统接入后会恢复为必填或从登录态获取
 - `name`: string，必填
 - `description`: string，可选
 - `target_date`: string，必填，格式为 `YYYY-MM-DD`
@@ -668,7 +703,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```
 
 失败响应：
-- `400`: 缺少 `name`、`target_date`，`user_id` 非法，字段格式非法，line item 非法，或引用的 item 不存在/已删除
+- `400`: 缺少 `name`、`target_date`，字段格式非法，或 line item 非法
+- `401`: access token 缺失、非法或过期
+- `404`: 引用的 item 不存在、已删除或不属于当前用户
 - `500`: 创建 checklist 失败
 
 ### List Checklists
@@ -677,13 +714,12 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 查询 checklist 列表
-- 当前阶段 `user_id` 可选；不传时返回全部未删除 checklist
 - 可通过 `q` 按 checklist name 或 description 做关键词子串匹配
 - 默认按创建时间倒序返回
 - 已逻辑删除的 checklist 不会出现在列表中
 
 请求参数：
-- `user_id`: string，可选，放在 query string 中。用户系统接入后会恢复为必填或从登录态获取
+- 需要 `Authorization: Bearer <access_token>`
 - `q`: string，可选，按 checklist name 或 description 子串匹配；当前最大长度为 50 个字符，传空字符串会返回 `400`
 
 成功响应：
@@ -695,7 +731,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```
 
 失败响应：
-- `400`: `user_id` 不是合法 ObjectID，或 `q` 为空/超过最大长度
+- `400`: `q` 为空/超过最大长度
+- `401`: access token 缺失、非法或过期
 - `500`: 查询 checklist 列表失败
 
 ### Get Checklist
@@ -704,16 +741,21 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 根据 `checklist_id` 读取单个 checklist 详情
+- 只允许读取当前登录用户自己的 checklist
 - 如果 checklist 已被逻辑删除，则按不存在处理
 
 路径参数：
 - `checklist_id`: string，必填，checklist 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
 
 成功响应：
 - 同 Create Checklist 成功响应结构
 
 失败响应：
 - `400`: 缺少 `checklist_id`，或 `checklist_id` 不是合法 ObjectID
+- `401`: access token 缺失、非法或过期
 - `404`: checklist 不存在
 - `500`: 查询 checklist 失败
 
@@ -723,6 +765,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 更新单个 checklist 的 metadata
+- 只允许更新当前登录用户自己的 checklist
 - 前端提交更新后的 `name`、`description`、`target_date`
 - 后端会保留 `id`、`user_id`、`status`、`created_at` 等系统字段，并更新 `updated_at`
 - `items` 不允许通过该接口更新；line item 需要使用 Add/Remove Checklist Line Items 接口修改
@@ -734,6 +777,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 路径参数：
 - `checklist_id`: string，必填，checklist 主键
 
+请求头：
+- `Authorization: Bearer <access_token>`
+
 请求字段：
 - `name`: string，必填
 - `description`: string，可选
@@ -741,6 +787,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 失败响应：
 - `400`: 缺少 `name`、`target_date`，`checklist_id` 非法，字段格式非法，或请求体包含 `items`
+- `401`: access token 缺失、非法或过期
 - `404`: checklist 不存在
 - `500`: 更新 checklist 失败
 
@@ -750,9 +797,10 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 向指定 checklist 批量增加 line item
+- 只允许更新当前登录用户自己的 checklist
 - 新增 line item 会自动生成自己的 `id`
 - 新增 line item 初始状态统一为 `unchecked`
-- 如果 line item 的 `reference_type` 是 `item`，后端会校验对应 item 存在且未被逻辑删除
+- 如果 line item 的 `reference_type` 是 `item`，后端会校验对应 item 存在、未被逻辑删除且属于当前登录用户
 - 更新成功后会更新 checklist 的 `updated_at`
 
 请求类型：
@@ -761,10 +809,13 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 路径参数：
 - `checklist_id`: string，必填，checklist 主键
 
+请求头：
+- `Authorization: Bearer <access_token>`
+
 请求字段：
 - `items`: object array，必填且不能为空
 - `items[].reference_type`: string，必填，只支持 `item` 或 `snapshot`
-- `items[].reference_id`: string。当 `reference_type` 为 `item` 时必填且必须是存在、未删除的 item id；当 `reference_type` 为 `snapshot` 时必须为空
+- `items[].reference_id`: string。当 `reference_type` 为 `item` 时必填且必须是存在、未删除且属于当前登录用户的 item id；当 `reference_type` 为 `snapshot` 时必须为空
 - `items[].snapshot`: object。当 `reference_type` 为 `snapshot` 时必填
 - `items[].snapshot.name`: string，当 `reference_type` 为 `snapshot` 时必填
 
@@ -791,8 +842,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - 同 Create Checklist 成功响应结构，返回增加后的完整 checklist
 
 失败响应：
-- `400`: 缺少 `items`，`checklist_id` 非法，line item 非法，或引用的 item 不存在/已删除
-- `404`: checklist 不存在
+- `400`: 缺少 `items`，`checklist_id` 非法，或 line item 非法
+- `401`: access token 缺失、非法或过期
+- `404`: checklist 不存在，或引用的 item 不存在、已删除或不属于当前用户
 - `500`: 更新 checklist 失败
 
 ### Remove Checklist Line Items
@@ -801,6 +853,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 从指定 checklist 批量移除 line item
+- 只允许更新当前登录用户自己的 checklist
 - 只有请求中的所有 `line_item_ids` 都属于当前 checklist 时才会更新
 - 更新成功后会更新 checklist 的 `updated_at`
 
@@ -809,6 +862,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 路径参数：
 - `checklist_id`: string，必填，checklist 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
 
 请求字段：
 - `line_item_ids`: string array，必填且不能为空，值为 checklist line item 的 `id`
@@ -829,6 +885,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 失败响应：
 - `400`: 缺少 `line_item_ids`，`checklist_id` 非法，或 `line_item_ids` 中存在非法 ObjectID
+- `401`: access token 缺失、非法或过期
 - `404`: checklist 不存在，或存在不属于该 checklist 的 line item id
 - `500`: 更新 checklist 失败
 
@@ -839,7 +896,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 用途：
 - 更新指定 checklist 中单个 line item 的勾选状态
 - 每次请求只更新一个 line item 的 `status`
+- 只允许更新当前登录用户自己的 checklist
 - 更新成功后会更新 checklist 的 `updated_at`
+- 这里不需要再额外校验 line item 引用的 item owner；因为对外暴露的是 checklist 内部 line item 状态变更，owner 边界由 checklist 本身和 create/add 时的 item owner 校验保证
 
 请求类型：
 - `application/json`
@@ -847,6 +906,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 路径参数：
 - `checklist_id`: string，必填，checklist 主键
 - `line_item_id`: string，必填，checklist line item 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
 
 请求字段：
 - `status`: string，必填，只允许 `checked` 或 `unchecked`
@@ -864,6 +926,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 失败响应：
 - `400`: 缺少 `status`，`status` 非法，`checklist_id` 非法，或 `line_item_id` 非法
+- `401`: access token 缺失、非法或过期
 - `404`: checklist 不存在，或 line item 不属于该 checklist
 - `500`: 更新 checklist line item status 失败，或读取更新后的 checklist 失败
 
@@ -873,10 +936,14 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 逻辑删除单个 checklist
+- 只允许删除当前登录用户自己的 checklist
 - 删除后会把 `status` 置为 `deleted`，不会真的从 MongoDB 中移除
 
 路径参数：
 - `checklist_id`: string，必填，checklist 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
 
 成功响应：
 
@@ -888,6 +955,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 失败响应：
 - `400`: 缺少 `checklist_id`，或 `checklist_id` 不是合法 ObjectID
+- `401`: access token 缺失、非法或过期
 - `404`: checklist 不存在或已被逻辑删除
 - `500`: 删除 checklist 失败
 

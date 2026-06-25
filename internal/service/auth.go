@@ -185,12 +185,9 @@ func (s *authService) Refresh(ctx context.Context, input request.RefreshTokenInp
 		return nil, fmt.Errorf("refresh token is expired")
 	}
 
-	user, err := s.users.GetByID(ctx, storedToken.UserID)
+	user, err := s.getActiveUserByID(ctx, storedToken.UserID)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, fmt.Errorf("user not found")
-		}
-		return nil, fmt.Errorf("get user failed: %w", err)
+		return nil, err
 	}
 
 	accessToken, err := s.tokens.CreateAccessToken(user.ID)
@@ -225,15 +222,7 @@ func (s *authService) Me(ctx context.Context, userID string) (*domain.User, erro
 		return nil, fmt.Errorf("invalid input")
 	}
 
-	user, err := s.users.GetByID(ctx, objectID)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, fmt.Errorf("user not found")
-		}
-		return nil, fmt.Errorf("get user failed: %w", err)
-	}
-
-	return user, nil
+	return s.getActiveUserByID(ctx, objectID)
 }
 
 func (s *authService) getOrCreatePhoneUser(ctx context.Context, phone string) (*domain.User, error) {
@@ -280,12 +269,26 @@ func (s *authService) getOrCreatePhoneUser(ctx context.Context, phone string) (*
 }
 
 func (s *authService) getUserByIdentity(ctx context.Context, identity *domain.AuthIdentity) (*domain.User, error) {
-	user, err := s.users.GetByID(ctx, identity.UserID)
+	user, err := s.getActiveUserByID(ctx, identity.UserID)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *authService) getActiveUserByID(ctx context.Context, userID bson.ObjectID) (*domain.User, error) {
+	user, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, fmt.Errorf("user not found")
 		}
 		return nil, fmt.Errorf("get user failed: %w", err)
+	}
+	if user.Status == domain.UserStatusDeleted {
+		return nil, fmt.Errorf("user not found")
+	}
+	if user.Status == domain.UserStatusDisabled {
+		return nil, fmt.Errorf("user is disabled")
 	}
 	return user, nil
 }

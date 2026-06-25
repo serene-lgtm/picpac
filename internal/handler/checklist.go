@@ -28,16 +28,15 @@ func NewChecklistHandler(svc service.ChecklistService) *ChecklistHandler {
 
 // CreateChecklist handles checklist creation requests.
 func (h *ChecklistHandler) CreateChecklist(c *gin.Context) {
-	var input request.CreateChecklistInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
 		return
 	}
 
-	input.UserID = strings.TrimSpace(input.UserID)
-	// TODO: Read current user from auth context after user accounts are implemented.
-	if !validateOptionalObjectID(input.UserID) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is invalid"})
+	var input request.CreateChecklistInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
 		return
 	}
 
@@ -50,6 +49,7 @@ func (h *ChecklistHandler) CreateChecklist(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target_date is required"})
 		return
 	}
+	input.UserID = userID
 
 	checklist, err := h.svc.CreateChecklist(c.Request.Context(), input)
 	if err != nil {
@@ -62,10 +62,9 @@ func (h *ChecklistHandler) CreateChecklist(c *gin.Context) {
 
 // ListChecklists handles checklist list requests.
 func (h *ChecklistHandler) ListChecklists(c *gin.Context) {
-	userID := strings.TrimSpace(c.Query("user_id"))
-	// TODO: Read current user from auth context after user accounts are implemented.
-	if !validateOptionalObjectID(userID) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is invalid"})
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
 		return
 	}
 
@@ -96,6 +95,12 @@ func (h *ChecklistHandler) ListChecklists(c *gin.Context) {
 
 // GetChecklist handles checklist detail requests.
 func (h *ChecklistHandler) GetChecklist(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	checklistID := strings.TrimSpace(c.Param("checklist_id"))
 	if checklistID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "checklist_id is required"})
@@ -106,7 +111,7 @@ func (h *ChecklistHandler) GetChecklist(c *gin.Context) {
 		return
 	}
 
-	checklist, err := h.svc.GetChecklist(c.Request.Context(), checklistID)
+	checklist, err := h.svc.GetChecklist(c.Request.Context(), checklistID, userID)
 	if err != nil {
 		respondChecklistError(c, err)
 		return
@@ -117,6 +122,12 @@ func (h *ChecklistHandler) GetChecklist(c *gin.Context) {
 
 // UpdateChecklist handles checklist update requests.
 func (h *ChecklistHandler) UpdateChecklist(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	checklistID := strings.TrimSpace(c.Param("checklist_id"))
 	if checklistID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "checklist_id is required"})
@@ -157,7 +168,7 @@ func (h *ChecklistHandler) UpdateChecklist(c *gin.Context) {
 		return
 	}
 
-	checklist, err := h.svc.UpdateChecklist(c.Request.Context(), checklistID, input)
+	checklist, err := h.svc.UpdateChecklist(c.Request.Context(), checklistID, userID, input)
 	if err != nil {
 		respondChecklistError(c, err)
 		return
@@ -168,6 +179,12 @@ func (h *ChecklistHandler) UpdateChecklist(c *gin.Context) {
 
 // AddChecklistLineItems handles checklist line item add requests.
 func (h *ChecklistHandler) AddChecklistLineItems(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	checklistID := strings.TrimSpace(c.Param("checklist_id"))
 	if checklistID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "checklist_id is required"})
@@ -188,7 +205,7 @@ func (h *ChecklistHandler) AddChecklistLineItems(c *gin.Context) {
 		return
 	}
 
-	checklist, err := h.svc.AddChecklistLineItems(c.Request.Context(), checklistID, input)
+	checklist, err := h.svc.AddChecklistLineItems(c.Request.Context(), checklistID, userID, input)
 	if err != nil {
 		respondChecklistError(c, err)
 		return
@@ -199,6 +216,12 @@ func (h *ChecklistHandler) AddChecklistLineItems(c *gin.Context) {
 
 // RemoveChecklistLineItems handles checklist line item remove requests.
 func (h *ChecklistHandler) RemoveChecklistLineItems(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	checklistID := strings.TrimSpace(c.Param("checklist_id"))
 	if checklistID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "checklist_id is required"})
@@ -219,7 +242,7 @@ func (h *ChecklistHandler) RemoveChecklistLineItems(c *gin.Context) {
 		return
 	}
 
-	checklist, err := h.svc.RemoveChecklistLineItems(c.Request.Context(), checklistID, input)
+	checklist, err := h.svc.RemoveChecklistLineItems(c.Request.Context(), checklistID, userID, input)
 	if err != nil {
 		respondChecklistError(c, err)
 		return
@@ -230,6 +253,12 @@ func (h *ChecklistHandler) RemoveChecklistLineItems(c *gin.Context) {
 
 // UpdateChecklistLineItemStatus handles checklist line item status update requests.
 func (h *ChecklistHandler) UpdateChecklistLineItemStatus(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	checklistID := strings.TrimSpace(c.Param("checklist_id"))
 	if checklistID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "checklist_id is required"})
@@ -260,7 +289,7 @@ func (h *ChecklistHandler) UpdateChecklistLineItemStatus(c *gin.Context) {
 		return
 	}
 
-	checklist, err := h.svc.UpdateChecklistLineItemStatus(c.Request.Context(), checklistID, lineItemID, input)
+	checklist, err := h.svc.UpdateChecklistLineItemStatus(c.Request.Context(), checklistID, lineItemID, userID, input)
 	if err != nil {
 		respondChecklistError(c, err)
 		return
@@ -271,6 +300,12 @@ func (h *ChecklistHandler) UpdateChecklistLineItemStatus(c *gin.Context) {
 
 // DeleteChecklist handles checklist deletion requests.
 func (h *ChecklistHandler) DeleteChecklist(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	checklistID := strings.TrimSpace(c.Param("checklist_id"))
 	if checklistID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "checklist_id is required"})
@@ -281,7 +316,7 @@ func (h *ChecklistHandler) DeleteChecklist(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.DeleteChecklist(c.Request.Context(), checklistID); err != nil {
+	if err := h.svc.DeleteChecklist(c.Request.Context(), checklistID, userID); err != nil {
 		respondChecklistError(c, err)
 		return
 	}
@@ -301,11 +336,11 @@ func respondChecklistError(c *gin.Context, err error) {
 		strings.Contains(message, "checklist line item ids are required"),
 		strings.Contains(message, "checklist line item status is required"),
 		strings.Contains(message, "checklist line item status is invalid"),
-		strings.Contains(message, "checklist line item reference item not found"),
 		strings.Contains(message, "checklist search keyword is required"),
 		strings.Contains(message, "checklist search keyword is too long"):
 		status = http.StatusBadRequest
 	case strings.Contains(message, "checklist line item not found"),
+		strings.Contains(message, "checklist line item reference item not found"),
 		strings.Contains(message, "checklist not found"):
 		status = http.StatusNotFound
 	case strings.Contains(message, "create checklist failed"),

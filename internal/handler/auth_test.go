@@ -189,7 +189,7 @@ func TestMeHandlerReturnsCurrentUser(t *testing.T) {
 		t.Fatalf("CreateAccessToken returned error: %v", err)
 	}
 	authHandler := NewAuthHandler(&fakeAuthService{user: &domain.User{ID: userID, DisplayName: "用户8000", Status: domain.UserStatusCreated}})
-	authMiddleware := NewAuthMiddleware(tokenService)
+	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
 	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
@@ -211,10 +211,35 @@ func TestAuthMiddlewareRejectsMissingToken(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	router := gin.New()
 	authHandler := NewAuthHandler(&fakeAuthService{})
-	authMiddleware := NewAuthMiddleware(service.NewTokenService("test-secret", time.Hour))
+	authMiddleware := NewAuthMiddleware(service.NewTokenService("test-secret", time.Hour), authHandler.svc)
 	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", recorder.Code)
+	}
+}
+
+func TestAuthMiddlewareRejectsDeletedUser(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	tokenService := service.NewTokenService("test-secret", time.Hour)
+	userID := bson.NewObjectID()
+	token, err := tokenService.CreateAccessToken(userID)
+	if err != nil {
+		t.Fatalf("CreateAccessToken returned error: %v", err)
+	}
+	authHandler := NewAuthHandler(&fakeAuthService{err: errors.New("user not found")})
+	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
+	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusUnauthorized {

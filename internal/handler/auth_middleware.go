@@ -14,11 +14,12 @@ const currentUserIDKey = "current_user_id"
 // AuthMiddleware handles access token authentication.
 type AuthMiddleware struct {
 	tokens service.TokenService
+	auth   service.AuthService
 }
 
 // NewAuthMiddleware creates an auth middleware.
-func NewAuthMiddleware(tokens service.TokenService) *AuthMiddleware {
-	return &AuthMiddleware{tokens: tokens}
+func NewAuthMiddleware(tokens service.TokenService, auth service.AuthService) *AuthMiddleware {
+	return &AuthMiddleware{tokens: tokens, auth: auth}
 }
 
 // RequireAuth requires a valid bearer access token.
@@ -42,7 +43,13 @@ func (m *AuthMiddleware) RequireAuth() gin.HandlerFunc {
 			return
 		}
 
-		c.Set(currentUserIDKey, userID.Hex())
+		user, err := m.auth.Me(c.Request.Context(), userID.Hex())
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.Set(currentUserIDKey, user.ID.Hex())
 		c.Next()
 	}
 }

@@ -396,6 +396,32 @@ func TestMeReturnsUser(t *testing.T) {
 	}
 }
 
+func TestMeRejectsDeletedUser(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{ID: userID, DisplayName: "用户8000", Status: domain.UserStatusDeleted}}
+	svc := newTestAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
+
+	_, err := svc.Me(context.Background(), userID.Hex())
+	if err == nil || !strings.Contains(err.Error(), "user not found") {
+		t.Fatalf("expected user not found, got %v", err)
+	}
+}
+
+func TestMeRejectsDisabledUser(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{ID: userID, DisplayName: "用户8000", Status: domain.UserStatusDisabled}}
+	svc := newTestAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
+
+	_, err := svc.Me(context.Background(), userID.Hex())
+	if err == nil || !strings.Contains(err.Error(), "user is disabled") {
+		t.Fatalf("expected user is disabled, got %v", err)
+	}
+}
+
 func TestLoginWithPhoneWrapsCreateUserFailure(t *testing.T) {
 	t.Parallel()
 
