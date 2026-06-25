@@ -30,7 +30,7 @@ func newRouter(cfg *config.Configuration, client *cos.Client, bucketURL *url.URL
 	uploadService := service.NewCOSUploadService(client, bucketURL)
 	tokenService := service.NewTokenService(cfg.Auth.AccessTokenSecret, time.Duration(cfg.Auth.AccessTokenTTLSeconds)*time.Second)
 	itemService := service.NewItemService(itemRepo, uploadService)
-	packService := service.NewPackService(packRepo)
+	packService := service.NewPackService(packRepo, itemRepo)
 	checklistService := service.NewChecklistService(checklistRepo, itemRepo)
 	authService := service.NewAuthService(userRepo, authIdentityRepo, phoneCodeRepo, refreshTokenRepo, service.NewFakeSMSService(), tokenService, cfg.Auth)
 
@@ -44,7 +44,7 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 	packHandler := handler.NewPackHandler(packService)
 	checklistHandler := handler.NewChecklistHandler(checklistService)
 	authHandler := handler.NewAuthHandler(authService)
-	authMiddleware := handler.NewAuthMiddleware(tokenService)
+	authMiddleware := handler.NewAuthMiddleware(tokenService, authService)
 
 	authRoutes := router.Group("/api/v1/auth")
 	authRoutes.POST("/phone/code", authHandler.SendPhoneCode)
@@ -54,6 +54,7 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
 
 	itemRoutes := router.Group("/api/v1/item")
+	itemRoutes.Use(authMiddleware.RequireAuth())
 	itemRoutes.POST("", itemHandler.CreateItem)
 	itemRoutes.GET("", itemHandler.ListItems)
 	itemRoutes.GET("/:item_id", itemHandler.GetItem)
@@ -61,6 +62,7 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 	itemRoutes.DELETE("/:item_id", itemHandler.DeleteItem)
 
 	packRoutes := router.Group("/api/v1/pack")
+	packRoutes.Use(authMiddleware.RequireAuth())
 	packRoutes.POST("", packHandler.CreatePack)
 	packRoutes.GET("", packHandler.ListPacks)
 	packRoutes.GET("/:pack_id", packHandler.GetPack)
@@ -68,6 +70,7 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 	packRoutes.DELETE("/:pack_id", packHandler.DeletePack)
 
 	checklistRoutes := router.Group("/api/v1/checklist")
+	checklistRoutes.Use(authMiddleware.RequireAuth())
 	checklistRoutes.POST("", checklistHandler.CreateChecklist)
 	checklistRoutes.GET("", checklistHandler.ListChecklists)
 	checklistRoutes.GET("/:checklist_id", checklistHandler.GetChecklist)

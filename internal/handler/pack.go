@@ -24,6 +24,12 @@ func NewPackHandler(svc service.PackService) *PackHandler {
 
 // CreatePack handles pack creation requests.
 func (h *PackHandler) CreatePack(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	var input request.CreatePackInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
@@ -35,15 +41,11 @@ func (h *PackHandler) CreatePack(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 		return
 	}
-	// TODO: Read current user from auth context after user accounts are implemented.
-	if !validateOptionalObjectID(input.UserID) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is invalid"})
-		return
-	}
 	if !validateObjectIDs(input.Items) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "items contains invalid item_id"})
 		return
 	}
+	input.UserID = userID
 
 	pack, err := h.svc.CreatePack(c.Request.Context(), input)
 	if err != nil {
@@ -56,10 +58,9 @@ func (h *PackHandler) CreatePack(c *gin.Context) {
 
 // ListPacks handles pack list requests.
 func (h *PackHandler) ListPacks(c *gin.Context) {
-	userID := strings.TrimSpace(c.Query("user_id"))
-	// TODO: Read current user from auth context after user accounts are implemented.
-	if !validateOptionalObjectID(userID) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is invalid"})
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
 		return
 	}
 
@@ -90,6 +91,12 @@ func (h *PackHandler) ListPacks(c *gin.Context) {
 
 // GetPack handles pack detail requests.
 func (h *PackHandler) GetPack(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	packID := strings.TrimSpace(c.Param("pack_id"))
 	if packID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pack_id is required"})
@@ -100,7 +107,7 @@ func (h *PackHandler) GetPack(c *gin.Context) {
 		return
 	}
 
-	pack, err := h.svc.GetPack(c.Request.Context(), packID)
+	pack, err := h.svc.GetPack(c.Request.Context(), packID, userID)
 	if err != nil {
 		respondPackError(c, err)
 		return
@@ -111,6 +118,12 @@ func (h *PackHandler) GetPack(c *gin.Context) {
 
 // UpdatePack handles pack update requests.
 func (h *PackHandler) UpdatePack(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	packID := strings.TrimSpace(c.Param("pack_id"))
 	if packID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pack_id is required"})
@@ -137,7 +150,7 @@ func (h *PackHandler) UpdatePack(c *gin.Context) {
 		return
 	}
 
-	pack, err := h.svc.UpdatePack(c.Request.Context(), packID, input)
+	pack, err := h.svc.UpdatePack(c.Request.Context(), packID, userID, input)
 	if err != nil {
 		respondPackError(c, err)
 		return
@@ -148,6 +161,12 @@ func (h *PackHandler) UpdatePack(c *gin.Context) {
 
 // DeletePack handles pack deletion requests.
 func (h *PackHandler) DeletePack(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	packID := strings.TrimSpace(c.Param("pack_id"))
 	if packID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pack_id is required"})
@@ -158,7 +177,7 @@ func (h *PackHandler) DeletePack(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.DeletePack(c.Request.Context(), packID); err != nil {
+	if err := h.svc.DeletePack(c.Request.Context(), packID, userID); err != nil {
 		respondPackError(c, err)
 		return
 	}
@@ -176,6 +195,8 @@ func respondPackError(c *gin.Context, err error) {
 		strings.Contains(message, "pack search keyword is too long"):
 		status = http.StatusBadRequest
 	case strings.Contains(message, "pack not found"):
+		status = http.StatusNotFound
+	case strings.Contains(message, "pack item not found"):
 		status = http.StatusNotFound
 	case strings.Contains(message, "create pack failed"),
 		strings.Contains(message, "list packs failed"),

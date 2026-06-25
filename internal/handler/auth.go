@@ -145,6 +145,8 @@ func respondAuthError(c *gin.Context, err error) {
 		strings.Contains(message, "refresh token is expired"),
 		strings.Contains(message, "refresh token is revoked"):
 		status = http.StatusUnauthorized
+	case strings.Contains(message, "user is disabled"):
+		status = http.StatusForbidden
 	case strings.Contains(message, "phone code send too frequently"):
 		status = http.StatusTooManyRequests
 	case strings.Contains(message, "user not found"):

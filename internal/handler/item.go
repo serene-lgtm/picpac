@@ -10,7 +10,6 @@ import (
 	"pack_mate/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // ItemHandler handles item HTTP requests.
@@ -25,16 +24,16 @@ func NewItemHandler(svc service.ItemService) *ItemHandler {
 
 // CreateItem handles item creation requests.
 func (h *ItemHandler) CreateItem(c *gin.Context) {
-	userID := strings.TrimSpace(c.PostForm("user_id"))
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	name := strings.TrimSpace(c.PostForm("name"))
 	description := c.PostForm("description")
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
-		return
-	}
-	// TODO: Read current user from auth context after user accounts are implemented.
-	if !validateOptionalObjectID(userID) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is invalid"})
 		return
 	}
 
@@ -60,10 +59,9 @@ func (h *ItemHandler) CreateItem(c *gin.Context) {
 
 // ListItems handles item list requests.
 func (h *ItemHandler) ListItems(c *gin.Context) {
-	userID := strings.TrimSpace(c.Query("user_id"))
-	// TODO: Read current user from auth context after user accounts are implemented.
-	if !validateOptionalObjectID(userID) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is invalid"})
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
 		return
 	}
 
@@ -94,13 +92,19 @@ func (h *ItemHandler) ListItems(c *gin.Context) {
 
 // GetItem handles item detail requests.
 func (h *ItemHandler) GetItem(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	itemID := strings.TrimSpace(c.Param("item_id"))
 	if itemID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "item_id is required"})
 		return
 	}
 
-	item, err := h.svc.GetItem(c.Request.Context(), itemID)
+	item, err := h.svc.GetItem(c.Request.Context(), itemID, userID)
 	if err != nil {
 		respondItemError(c, err)
 		return
@@ -111,6 +115,12 @@ func (h *ItemHandler) GetItem(c *gin.Context) {
 
 // UpdateItem handles item update requests.
 func (h *ItemHandler) UpdateItem(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	itemID := strings.TrimSpace(c.Param("item_id"))
 	if itemID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "item_id is required"})
@@ -134,7 +144,7 @@ func (h *ItemHandler) UpdateItem(c *gin.Context) {
 		input.FileName = header.Filename
 	}
 
-	item, err := h.svc.UpdateItem(c.Request.Context(), itemID, input)
+	item, err := h.svc.UpdateItem(c.Request.Context(), itemID, userID, input)
 	if err != nil {
 		respondItemError(c, err)
 		return
@@ -145,13 +155,19 @@ func (h *ItemHandler) UpdateItem(c *gin.Context) {
 
 // DeleteItem handles item deletion requests.
 func (h *ItemHandler) DeleteItem(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
 	itemID := strings.TrimSpace(c.Param("item_id"))
 	if itemID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "item_id is required"})
 		return
 	}
 
-	if err := h.svc.DeleteItem(c.Request.Context(), itemID); err != nil {
+	if err := h.svc.DeleteItem(c.Request.Context(), itemID, userID); err != nil {
 		respondItemError(c, err)
 		return
 	}
@@ -193,13 +209,4 @@ func buildItemResponse(item *domain.Item) response.ItemResponse {
 		AIRenderedImageURL: item.AIRenderedImageURL,
 		Status:             string(item.Status),
 	}
-}
-
-func validateOptionalObjectID(value string) bool {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return true
-	}
-	_, err := bson.ObjectIDFromHex(trimmed)
-	return err == nil
 }

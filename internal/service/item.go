@@ -27,9 +27,9 @@ var maxItemSearchKeywordRunes = 50
 type ItemService interface {
 	CreateItem(ctx context.Context, input request.CreateItemInput) (*domain.Item, error)
 	ListItems(ctx context.Context, input request.ListItemsInput) ([]domain.Item, error)
-	GetItem(ctx context.Context, itemID string) (*domain.Item, error)
-	UpdateItem(ctx context.Context, itemID string, input request.UpdateItemInput) (*domain.Item, error)
-	DeleteItem(ctx context.Context, itemID string) error
+	GetItem(ctx context.Context, itemID string, userID string) (*domain.Item, error)
+	UpdateItem(ctx context.Context, itemID string, userID string, input request.UpdateItemInput) (*domain.Item, error)
+	DeleteItem(ctx context.Context, itemID string, userID string) error
 }
 
 type itemService struct {
@@ -52,8 +52,7 @@ func (s *itemService) CreateItem(ctx context.Context, input request.CreateItemIn
 		return nil, fmt.Errorf("item name is required")
 	}
 
-	// TODO: Verify item ownership after user accounts/auth are implemented.
-	userID, err := parseOptionalObjectID(input.UserID)
+	userID, err := parseObjectID(input.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid input")
 	}
@@ -106,11 +105,6 @@ func (s *itemService) ListItems(ctx context.Context, input request.ListItemsInpu
 }
 
 func (s *itemService) listItems(ctx context.Context, userID string) ([]domain.Item, error) {
-	// TODO: Filter by authenticated user after user accounts/auth are implemented.
-	if strings.TrimSpace(userID) == "" {
-		return s.repo.ListAll(ctx)
-	}
-
 	objectID, err := parseObjectID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid input")
@@ -120,17 +114,12 @@ func (s *itemService) listItems(ctx context.Context, userID string) ([]domain.It
 }
 
 func (s *itemService) searchItemsByKeyword(ctx context.Context, userID string, keyword string) ([]domain.Item, error) {
-	// TODO: Filter by authenticated user after user accounts/auth are implemented.
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
 		return nil, fmt.Errorf("item search keyword is required")
 	}
 	if utf8.RuneCountInString(keyword) > maxItemSearchKeywordRunes {
 		return nil, fmt.Errorf("item search keyword is too long")
-	}
-
-	if strings.TrimSpace(userID) == "" {
-		return s.repo.SearchByKeyword(ctx, keyword)
 	}
 
 	objectID, err := parseObjectID(userID)
@@ -142,42 +131,20 @@ func (s *itemService) searchItemsByKeyword(ctx context.Context, userID string, k
 }
 
 // GetItem gets a single item by ID.
-func (s *itemService) GetItem(ctx context.Context, itemID string) (*domain.Item, error) {
-	objectID, err := parseObjectID(itemID)
+func (s *itemService) GetItem(ctx context.Context, itemID string, userID string) (*domain.Item, error) {
+	item, err := s.getOwnedItem(ctx, itemID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid input")
-	}
-
-	item, err := s.repo.GetByID(ctx, objectID)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, fmt.Errorf("item not found")
-		}
-		return nil, fmt.Errorf("get item failed: %w", err)
-	}
-	if item.Status == domain.ItemStatusDeleted {
-		return nil, fmt.Errorf("item not found")
+		return nil, err
 	}
 
 	return item, nil
 }
 
 // UpdateItem updates an existing item.
-func (s *itemService) UpdateItem(ctx context.Context, itemID string, input request.UpdateItemInput) (*domain.Item, error) {
-	objectID, err := parseObjectID(itemID)
+func (s *itemService) UpdateItem(ctx context.Context, itemID string, userID string, input request.UpdateItemInput) (*domain.Item, error) {
+	item, err := s.getOwnedItem(ctx, itemID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid input")
-	}
-
-	item, err := s.repo.GetByID(ctx, objectID)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, fmt.Errorf("item not found")
-		}
-		return nil, fmt.Errorf("get item failed: %w", err)
-	}
-	if item.Status == domain.ItemStatusDeleted {
-		return nil, fmt.Errorf("item not found")
+		return nil, err
 	}
 
 	name := strings.TrimSpace(input.Name)
@@ -208,10 +175,13 @@ func (s *itemService) UpdateItem(ctx context.Context, itemID string, input reque
 }
 
 // DeleteItem logically deletes a single item by ID.
-func (s *itemService) DeleteItem(ctx context.Context, itemID string) error {
+func (s *itemService) DeleteItem(ctx context.Context, itemID string, userID string) error {
 	objectID, err := parseObjectID(itemID)
 	if err != nil {
 		return fmt.Errorf("invalid input")
+	}
+	if _, err := s.getOwnedItem(ctx, itemID, userID); err != nil {
+		return err
 	}
 
 	if err := s.repo.DeleteByID(ctx, objectID); err != nil {
@@ -222,6 +192,30 @@ func (s *itemService) DeleteItem(ctx context.Context, itemID string) error {
 	}
 
 	return nil
+}
+
+func (s *itemService) getOwnedItem(ctx context.Context, itemID string, userID string) (*domain.Item, error) {
+	objectID, err := parseObjectID(itemID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+	currentUserID, err := parseObjectID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+
+	item, err := s.repo.GetByID(ctx, objectID)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("item not found")
+		}
+		return nil, fmt.Errorf("get item failed: %w", err)
+	}
+	if item.Status == domain.ItemStatusDeleted || item.UserID != currentUserID {
+		return nil, fmt.Errorf("item not found")
+	}
+
+	return item, nil
 }
 
 func (s *itemService) uploadItemImage(ctx context.Context, itemID bson.ObjectID, fileName string, file io.ReadSeeker) (string, error) {
