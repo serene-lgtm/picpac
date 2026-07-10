@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 type fakeUserRepository struct {
 	created *domain.User
 	got     *domain.User
+	updated *domain.User
 	err     error
 }
 
@@ -38,6 +41,15 @@ func (r *fakeUserRepository) GetByID(_ context.Context, _ bson.ObjectID) (*domai
 		return nil, mongo.ErrNoDocuments
 	}
 	return r.got, nil
+}
+
+func (r *fakeUserRepository) Update(_ context.Context, user *domain.User) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.updated = user
+	r.got = user
+	return nil
 }
 
 type fakeAuthIdentityRepository struct {
@@ -156,6 +168,23 @@ type recordingSMSService struct {
 	err   error
 }
 
+type fakeAuthUploadService struct {
+	objectKey string
+	err       error
+}
+
+func (s *fakeAuthUploadService) Upload(_ context.Context, objectKey string, _ string, _ io.Reader) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.objectKey = objectKey
+	return nil
+}
+
+func testImageReader() *bytes.Reader {
+	return bytes.NewReader([]byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00})
+}
+
 func (s *recordingSMSService) SendLoginCode(_ context.Context, phone string, code string) error {
 	if s.err != nil {
 		return s.err
@@ -188,6 +217,7 @@ func newTestAuthService(users *fakeUserRepository, identities *fakeAuthIdentityR
 		identities,
 		codes,
 		refreshTokens,
+		&fakeAuthUploadService{},
 		sms,
 		NewTokenService(cfg.AccessTokenSecret, time.Duration(cfg.AccessTokenTTLSeconds)*time.Second),
 		cfg,
@@ -253,6 +283,15 @@ func TestLoginWithPhoneCreatesUserOnFirstLogin(t *testing.T) {
 	if users.created == nil {
 		t.Fatalf("expected user to be created")
 	}
+	if users.created.Profile.Username != "user8613800138000" {
+		t.Fatalf("expected default username user8613800138000, got %+v", users.created.Profile)
+	}
+	if users.created.Profile.AvatarObjectKey != defaultUserAvatarObjectKey {
+		t.Fatalf("expected default avatar object key %s, got %s", defaultUserAvatarObjectKey, users.created.Profile.AvatarObjectKey)
+	}
+	if users.created.Profile.Gender != "" || users.created.Profile.Birthday != nil {
+		t.Fatalf("expected empty gender and birthday, got %+v", users.created.Profile)
+	}
 	if identities.created == nil || identities.created.UserID != users.created.ID {
 		t.Fatalf("expected identity to be created for user, got %+v", identities.created)
 	}
@@ -268,7 +307,7 @@ func TestLoginWithPhoneReusesExistingUser(t *testing.T) {
 	t.Parallel()
 
 	userID := bson.NewObjectID()
-	user := &domain.User{ID: userID, DisplayName: "用户8000", Status: domain.UserStatusCreated}
+	user := &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusCreated}
 	codes := &fakePhoneCodeRepository{
 		got: &domain.PhoneVerificationCode{
 			ID:       bson.NewObjectID(),
@@ -326,7 +365,7 @@ func TestRefreshRejectsRevokedToken(t *testing.T) {
 		ExpiresAt: time.Now().Add(time.Hour),
 		RevokedAt: &revokedAt,
 	}}
-	svc := NewAuthService(&fakeUserRepository{}, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, refreshTokens, &recordingSMSService{}, tokenService, cfg)
+	svc := NewAuthService(&fakeUserRepository{}, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, refreshTokens, &fakeAuthUploadService{}, &recordingSMSService{}, tokenService, cfg)
 
 	_, err = svc.Refresh(context.Background(), request.RefreshTokenInput{RefreshToken: plain})
 	if err == nil || !strings.Contains(err.Error(), "refresh token is revoked") {
@@ -344,13 +383,13 @@ func TestRefreshReturnsAccessTokenWithoutRotatingRefreshToken(t *testing.T) {
 		t.Fatalf("CreateRefreshToken returned error: %v", err)
 	}
 	userID := bson.NewObjectID()
-	users := &fakeUserRepository{got: &domain.User{ID: userID, DisplayName: "用户8000", Status: domain.UserStatusCreated}}
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusCreated}}
 	refreshTokens := &fakeRefreshTokenRepository{got: &domain.RefreshToken{
 		UserID:    userID,
 		TokenHash: hash,
 		ExpiresAt: time.Now().Add(time.Hour),
 	}}
-	svc := NewAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, refreshTokens, &recordingSMSService{}, tokenService, cfg)
+	svc := NewAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, refreshTokens, &fakeAuthUploadService{}, &recordingSMSService{}, tokenService, cfg)
 
 	result, err := svc.Refresh(context.Background(), request.RefreshTokenInput{RefreshToken: plain})
 	if err != nil {
@@ -370,7 +409,7 @@ func TestLogoutRevokesRefreshToken(t *testing.T) {
 	cfg := validAuthConfig()
 	tokenService := NewTokenService(cfg.AccessTokenSecret, time.Hour)
 	refreshTokens := &fakeRefreshTokenRepository{}
-	svc := NewAuthService(&fakeUserRepository{}, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, refreshTokens, &recordingSMSService{}, tokenService, cfg)
+	svc := NewAuthService(&fakeUserRepository{}, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, refreshTokens, &fakeAuthUploadService{}, &recordingSMSService{}, tokenService, cfg)
 
 	if err := svc.Logout(context.Background(), request.LogoutInput{RefreshToken: "refresh"}); err != nil {
 		t.Fatalf("Logout returned error: %v", err)
@@ -384,7 +423,7 @@ func TestMeReturnsUser(t *testing.T) {
 	t.Parallel()
 
 	userID := bson.NewObjectID()
-	users := &fakeUserRepository{got: &domain.User{ID: userID, DisplayName: "用户8000", Status: domain.UserStatusCreated}}
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusCreated}}
 	svc := newTestAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
 
 	user, err := svc.Me(context.Background(), userID.Hex())
@@ -396,11 +435,85 @@ func TestMeReturnsUser(t *testing.T) {
 	}
 }
 
+func TestUpdateMyProfileUpdatesUser(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "旧用户名", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusCreated}}
+	svc := newTestAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
+
+	user, err := svc.UpdateMyProfile(context.Background(), userID.Hex(), request.UpdateMyProfileInput{
+		Username: "新用户",
+		Gender:   "female",
+		Birthday: "1998-08-20",
+		File:     testImageReader(),
+		FileName: "avatar.png",
+	})
+	if err != nil {
+		t.Fatalf("UpdateMyProfile returned error: %v", err)
+	}
+	if users.updated == nil {
+		t.Fatalf("expected user to be updated")
+	}
+	expectedAvatarObjectKey := "user-avatar/user_" + userID.Hex() + ".png"
+	if user.Profile.Username != "新用户" || user.Profile.Gender != domain.UserGenderFemale || user.Profile.AvatarObjectKey != expectedAvatarObjectKey {
+		t.Fatalf("unexpected updated user: %+v", user.Profile)
+	}
+	if user.Profile.Birthday == nil || user.Profile.Birthday.Format("2006-01-02") != "1998-08-20" {
+		t.Fatalf("unexpected birthday: %+v", user.Profile.Birthday)
+	}
+}
+
+func TestUpdateMyProfileRejectsInvalidGender(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "旧用户名", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusCreated}}
+	svc := newTestAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
+
+	_, err := svc.UpdateMyProfile(context.Background(), userID.Hex(), request.UpdateMyProfileInput{
+		Username: "新用户",
+		Gender:   "robot",
+		Birthday: "1998-08-20",
+		File:     testImageReader(),
+		FileName: "avatar.png",
+	})
+	if err == nil || !strings.Contains(err.Error(), "gender is invalid") {
+		t.Fatalf("expected invalid gender error, got %v", err)
+	}
+}
+
+func TestUpdateMyProfileKeepsDefaultAvatarWhenFileMissing(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "旧用户名", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusCreated}}
+	svc := newTestAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
+
+	user, err := svc.UpdateMyProfile(context.Background(), userID.Hex(), request.UpdateMyProfileInput{
+		Username: "新用户",
+		Gender:   "private",
+		Birthday: "",
+	})
+	if err != nil {
+		t.Fatalf("UpdateMyProfile returned error: %v", err)
+	}
+	if user.Profile.AvatarObjectKey != defaultUserAvatarObjectKey {
+		t.Fatalf("expected default avatar object key to be kept, got %s", user.Profile.AvatarObjectKey)
+	}
+	if user.Profile.Gender != domain.UserGenderPrivate {
+		t.Fatalf("expected private gender, got %s", user.Profile.Gender)
+	}
+	if user.Profile.Birthday != nil {
+		t.Fatalf("expected birthday to be cleared, got %+v", user.Profile.Birthday)
+	}
+}
+
 func TestMeRejectsDeletedUser(t *testing.T) {
 	t.Parallel()
 
 	userID := bson.NewObjectID()
-	users := &fakeUserRepository{got: &domain.User{ID: userID, DisplayName: "用户8000", Status: domain.UserStatusDeleted}}
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusDeleted}}
 	svc := newTestAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
 
 	_, err := svc.Me(context.Background(), userID.Hex())
@@ -413,7 +526,7 @@ func TestMeRejectsDisabledUser(t *testing.T) {
 	t.Parallel()
 
 	userID := bson.NewObjectID()
-	users := &fakeUserRepository{got: &domain.User{ID: userID, DisplayName: "用户8000", Status: domain.UserStatusDisabled}}
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusDisabled}}
 	svc := newTestAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
 
 	_, err := svc.Me(context.Background(), userID.Hex())

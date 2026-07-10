@@ -2,10 +2,13 @@
   "server": {
     "port": "9090"
   },
-  "cos": {
-    "bucket_url": "偷apikey的替我挡灾",
-    "secret_id": "偷apikey的替我挡灾",
-    "secret_key": "偷apikey的替我挡灾"
+  "oss": {
+    "endpoint": "https://oss-cn-shanghai.aliyuncs.com",
+    "bucket_name": "picpac",
+    "access_key_id": "偷apikey的替我挡灾",
+    "access_key_secret": "偷apikey的替我挡灾",
+    "public_base_url": "https://picpac.oss-cn-shanghai.aliyuncs.com",
+    "signed_url_ttl_seconds": 86400
   },
   "dashscope": {
     "api_key": "偷apikey的替我挡灾",

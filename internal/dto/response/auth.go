@@ -19,10 +19,17 @@ type RefreshAccessTokenResponse struct {
 
 // UserResponse defines the API response for a user.
 type UserResponse struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"display_name"`
-	AvatarURL   string `json:"avatar_url"`
-	Status      string `json:"status"`
+	ID      string              `json:"id"`
+	Profile UserProfileResponse `json:"profile"`
+	Status  string              `json:"status"`
+}
+
+// UserProfileResponse defines the API response for a user profile.
+type UserProfileResponse struct {
+	Username  string `json:"username"`
+	Gender    string `json:"gender"`
+	Birthday  string `json:"birthday"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 // LogoutResponse defines the API response for logout.

@@ -100,7 +100,7 @@ func (s *fakeAuthService) SendPhoneCode(_ context.Context, _ request.SendPhoneCo
 }
 
 func (s *fakeAuthService) LoginWithPhone(_ context.Context, _ request.PhoneLoginInput) (*service.AuthResult, error) {
-	return &service.AuthResult{AccessToken: "access", RefreshToken: "refresh", User: &domain.User{ID: bson.NewObjectID(), DisplayName: "user", Status: domain.UserStatusCreated}}, nil
+	return &service.AuthResult{AccessToken: "access", RefreshToken: "refresh", User: &domain.User{ID: bson.NewObjectID(), Profile: domain.UserProfile{Username: "user", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}}, nil
 }
 
 func (s *fakeAuthService) Refresh(_ context.Context, _ request.RefreshTokenInput) (*service.RefreshResult, error) {
@@ -112,7 +112,11 @@ func (s *fakeAuthService) Logout(_ context.Context, _ request.LogoutInput) error
 }
 
 func (s *fakeAuthService) Me(_ context.Context, _ string) (*domain.User, error) {
-	return &domain.User{ID: bson.NewObjectID(), DisplayName: "user", Status: domain.UserStatusCreated}, nil
+	return &domain.User{ID: bson.NewObjectID(), Profile: domain.UserProfile{Username: "user", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}, nil
+}
+
+func (s *fakeAuthService) UpdateMyProfile(_ context.Context, _ string, _ request.UpdateMyProfileInput) (*domain.User, error) {
+	return &domain.User{ID: bson.NewObjectID(), Profile: domain.UserProfile{Username: "user", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}, nil
 }
 
 type fakeTokenService struct{}
@@ -133,12 +137,18 @@ func (s *fakeTokenService) HashToken(_ string) string {
 	return "hash"
 }
 
+type fakeObjectURLSigner struct{}
+
+func (s *fakeObjectURLSigner) SignGetURL(_ context.Context, objectKey string) (string, error) {
+	return "https://signed.example/" + objectKey, nil
+}
+
 func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeAuthService{}, &fakeTokenService{})
+	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
 
 	tests := []struct {
 		method string
@@ -167,6 +177,7 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/auth/refresh"},
 		{method: http.MethodPost, path: "/api/v1/auth/logout"},
 		{method: http.MethodGet, path: "/api/v1/me"},
+		{method: http.MethodPut, path: "/api/v1/me/profile"},
 	}
 
 	for _, test := range tests {

@@ -15,16 +15,16 @@ import (
 const itemCollectionName = "items"
 
 type itemDocument struct {
-	ID                 bson.ObjectID     `json:"id" bson:"_id,omitempty"`
-	UserID             bson.ObjectID     `json:"user_id" bson:"uid"`
-	Name               string            `json:"name" bson:"nm"`
-	Description        string            `json:"description" bson:"desc"`
-	SourceImageURL     string            `json:"source_image_url" bson:"src"`
-	ImageThumbnailURL  string            `json:"image_thumbnail_url" bson:"thb"`
-	AIRenderedImageURL string            `json:"ai_rendered_image_url" bson:"air"`
-	Status             domain.ItemStatus `json:"status" bson:"st"`
-	CreatedAt          time.Time         `json:"created_at" bson:"cat"`
-	UpdatedAt          time.Time         `json:"updated_at" bson:"uat"`
+	ID                       bson.ObjectID     `json:"id" bson:"_id,omitempty"`
+	UserID                   bson.ObjectID     `json:"user_id" bson:"uid"`
+	Name                     string            `json:"name" bson:"nm"`
+	Description              string            `json:"description" bson:"desc"`
+	SourceImageObjectKey     string            `json:"source_image_object_key" bson:"siok"`
+	ImageThumbnailObjectKey  string            `json:"image_thumbnail_object_key" bson:"itok"`
+	AIRenderedImageObjectKey string            `json:"ai_rendered_image_object_key" bson:"aiok"`
+	Status                   domain.ItemStatus `json:"status" bson:"st"`
+	CreatedAt                time.Time         `json:"created_at" bson:"cat"`
+	UpdatedAt                time.Time         `json:"updated_at" bson:"uat"`
 }
 
 // ItemRepository stores item domain models in MongoDB.
@@ -173,31 +173,31 @@ func (r *ItemRepository) find(ctx context.Context, filter bson.M) ([]itemDocumen
 
 func newItemDocument(item *domain.Item) itemDocument {
 	return itemDocument{
-		ID:                 item.ID,
-		UserID:             item.UserID,
-		Name:               item.Name,
-		Description:        item.Description,
-		SourceImageURL:     item.SourceImageURL,
-		ImageThumbnailURL:  item.ImageThumbnailURL,
-		AIRenderedImageURL: item.AIRenderedImageURL,
-		Status:             item.Status,
-		CreatedAt:          item.CreatedAt,
-		UpdatedAt:          item.UpdatedAt,
+		ID:                       item.ID,
+		UserID:                   item.UserID,
+		Name:                     item.Name,
+		Description:              item.Description,
+		SourceImageObjectKey:     item.SourceImageObjectKey,
+		ImageThumbnailObjectKey:  item.ImageThumbnailObjectKey,
+		AIRenderedImageObjectKey: item.AIRenderedImageObjectKey,
+		Status:                   item.Status,
+		CreatedAt:                item.CreatedAt,
+		UpdatedAt:                item.UpdatedAt,
 	}
 }
 
 func newDomainItem(doc itemDocument) domain.Item {
 	return domain.Item{
-		ID:                 doc.ID,
-		UserID:             doc.UserID,
-		Name:               doc.Name,
-		Description:        doc.Description,
-		SourceImageURL:     doc.SourceImageURL,
-		ImageThumbnailURL:  doc.ImageThumbnailURL,
-		AIRenderedImageURL: doc.AIRenderedImageURL,
-		Status:             doc.Status,
-		CreatedAt:          doc.CreatedAt,
-		UpdatedAt:          doc.UpdatedAt,
+		ID:                       doc.ID,
+		UserID:                   doc.UserID,
+		Name:                     doc.Name,
+		Description:              doc.Description,
+		SourceImageObjectKey:     doc.SourceImageObjectKey,
+		ImageThumbnailObjectKey:  doc.ImageThumbnailObjectKey,
+		AIRenderedImageObjectKey: doc.AIRenderedImageObjectKey,
+		Status:                   doc.Status,
+		CreatedAt:                doc.CreatedAt,
+		UpdatedAt:                doc.UpdatedAt,
 	}
 }
 

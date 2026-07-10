@@ -13,12 +13,18 @@ import (
 const userCollectionName = "users"
 
 type userDocument struct {
-	ID          bson.ObjectID     `json:"id" bson:"_id,omitempty"`
-	DisplayName string            `json:"display_name" bson:"dnm"`
-	AvatarURL   string            `json:"avatar_url" bson:"avt"`
-	Status      domain.UserStatus `json:"status" bson:"st"`
-	CreatedAt   time.Time         `json:"created_at" bson:"cat"`
-	UpdatedAt   time.Time         `json:"updated_at" bson:"uat"`
+	ID        bson.ObjectID       `json:"id" bson:"_id,omitempty"`
+	Profile   userProfileDocument `json:"profile" bson:"pf"`
+	Status    domain.UserStatus   `json:"status" bson:"st"`
+	CreatedAt time.Time           `json:"created_at" bson:"cat"`
+	UpdatedAt time.Time           `json:"updated_at" bson:"uat"`
+}
+
+type userProfileDocument struct {
+	Username        string            `json:"username" bson:"unm"`
+	Gender          domain.UserGender `json:"gender" bson:"gdr"`
+	Birthday        *time.Time        `json:"birthday" bson:"bdy"`
+	AvatarObjectKey string            `json:"avatar_object_key" bson:"aok"`
 }
 
 // UserRepository stores user domain models in MongoDB.
@@ -51,24 +57,58 @@ func (r *UserRepository) GetByID(ctx context.Context, userID bson.ObjectID) (*do
 	return &user, nil
 }
 
+// Update replaces the non-deleted user document with the given ID.
+func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
+	doc := newUserDocument(user)
+
+	result, err := r.collection.ReplaceOne(ctx, bson.M{
+		"_id": user.ID,
+		"st":  bson.M{"$ne": domain.UserStatusDeleted},
+	}, doc)
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
+		return mongo.ErrNoDocuments
+	}
+
+	return nil
+}
+
 func newUserDocument(user *domain.User) userDocument {
 	return userDocument{
-		ID:          user.ID,
-		DisplayName: user.DisplayName,
-		AvatarURL:   user.AvatarURL,
-		Status:      user.Status,
-		CreatedAt:   user.CreatedAt,
-		UpdatedAt:   user.UpdatedAt,
+		ID:        user.ID,
+		Profile:   newUserProfileDocument(user.Profile),
+		Status:    user.Status,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
 	}
 }
 
 func newDomainUser(doc userDocument) domain.User {
 	return domain.User{
-		ID:          doc.ID,
-		DisplayName: doc.DisplayName,
-		AvatarURL:   doc.AvatarURL,
-		Status:      doc.Status,
-		CreatedAt:   doc.CreatedAt,
-		UpdatedAt:   doc.UpdatedAt,
+		ID:        doc.ID,
+		Profile:   newDomainUserProfile(doc.Profile),
+		Status:    doc.Status,
+		CreatedAt: doc.CreatedAt,
+		UpdatedAt: doc.UpdatedAt,
+	}
+}
+
+func newUserProfileDocument(profile domain.UserProfile) userProfileDocument {
+	return userProfileDocument{
+		Username:        profile.Username,
+		Gender:          profile.Gender,
+		Birthday:        profile.Birthday,
+		AvatarObjectKey: profile.AvatarObjectKey,
+	}
+}
+
+func newDomainUserProfile(doc userProfileDocument) domain.UserProfile {
+	return domain.UserProfile{
+		Username:        doc.Username,
+		Gender:          doc.Gender,
+		Birthday:        doc.Birthday,
+		AvatarObjectKey: doc.AvatarObjectKey,
 	}
 }

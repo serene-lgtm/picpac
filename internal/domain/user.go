@@ -7,13 +7,27 @@ import (
 )
 
 type User struct {
-	ID          bson.ObjectID `json:"id"`
-	DisplayName string        `json:"display_name"`
-	AvatarURL   string        `json:"avatar_url"`
-	Status      UserStatus    `json:"status"`
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	ID        bson.ObjectID `json:"id"`
+	Profile   UserProfile   `json:"profile"`
+	Status    UserStatus    `json:"status"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
 }
+
+type UserProfile struct {
+	Username        string     `json:"username"`
+	Gender          UserGender `json:"gender"`
+	Birthday        *time.Time `json:"birthday"`
+	AvatarObjectKey string     `json:"avatar_object_key"`
+}
+
+type UserGender string
+
+const (
+	UserGenderMale    UserGender = "male"
+	UserGenderFemale  UserGender = "female"
+	UserGenderPrivate UserGender = "private"
+)
 
 type UserStatus string
 

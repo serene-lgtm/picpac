@@ -50,6 +50,7 @@ type ChecklistRepository interface {
 type UserRepository interface {
 	Create(ctx context.Context, user *domain.User) error
 	GetByID(ctx context.Context, userID bson.ObjectID) (*domain.User, error)
+	Update(ctx context.Context, user *domain.User) error
 }
 
 // AuthIdentityRepository defines persistence behavior for auth identities.
