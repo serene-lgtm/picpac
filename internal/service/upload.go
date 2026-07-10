@@ -4,46 +4,73 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
 	"strings"
 
-	"github.com/tencentyun/cos-go-sdk-v5"
+	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 )
 
 // UploadService defines object upload behavior.
 type UploadService interface {
-	Upload(ctx context.Context, objectKey string, contentType string, body io.Reader) (string, error)
+	Upload(ctx context.Context, objectKey string, contentType string, body io.Reader) error
 }
 
-// COSUploadService uploads objects to Tencent COS.
-type COSUploadService struct {
-	client    *cos.Client
-	bucketURL *url.URL
+// ObjectURLSigner defines private object URL signing behavior.
+type ObjectURLSigner interface {
+	SignGetURL(ctx context.Context, objectKey string) (string, error)
 }
 
-// NewCOSUploadService creates a COS-backed upload service.
-func NewCOSUploadService(client *cos.Client, bucketURL *url.URL) *COSUploadService {
-	return &COSUploadService{
-		client:    client,
-		bucketURL: bucketURL,
+// OSSUploadService uploads objects to Alibaba Cloud OSS.
+type OSSUploadService struct {
+	bucket              *oss.Bucket
+	signedURLTTLSeconds int64
+}
+
+// NewOSSUploadService creates an OSS-backed upload service.
+func NewOSSUploadService(bucket *oss.Bucket, signedURLTTLSeconds int64) *OSSUploadService {
+	return &OSSUploadService{
+		bucket:              bucket,
+		signedURLTTLSeconds: signedURLTTLSeconds,
 	}
 }
 
-// Upload uploads an object to COS and returns its URL.
-func (s *COSUploadService) Upload(ctx context.Context, objectKey string, contentType string, body io.Reader) (string, error) {
-	if s == nil || s.client == nil || s.bucketURL == nil {
+// Upload uploads an object to OSS.
+func (s *OSSUploadService) Upload(ctx context.Context, objectKey string, contentType string, body io.Reader) error {
+	if s == nil || s.bucket == nil {
+		return fmt.Errorf("upload service is not configured")
+	}
+
+	objectKey = strings.TrimLeft(strings.TrimSpace(objectKey), "/")
+	if objectKey == "" {
+		return fmt.Errorf("object key is required")
+	}
+
+	if err := s.bucket.PutObject(objectKey, body, oss.ContentType(strings.TrimSpace(contentType))); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// SignGetURL signs an OSS object URL for temporary GET access.
+func (s *OSSUploadService) SignGetURL(ctx context.Context, objectKey string) (string, error) {
+	if s == nil || s.bucket == nil {
 		return "", fmt.Errorf("upload service is not configured")
 	}
 
-	_, err := s.client.Object.Put(ctx, objectKey, body, &cos.ObjectPutOptions{
-		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
-			ContentType: strings.TrimSpace(contentType),
-		},
-	})
+	objectKey = strings.TrimLeft(strings.TrimSpace(objectKey), "/")
+	if objectKey == "" {
+		return "", fmt.Errorf("object key is required")
+	}
+
+	ttl := s.signedURLTTLSeconds
+	if ttl <= 0 {
+		ttl = 3600
+	}
+
+	signedURL, err := s.bucket.SignURL(objectKey, oss.HTTPGet, ttl)
 	if err != nil {
 		return "", err
 	}
 
-	baseURL := strings.TrimRight(s.bucketURL.String(), "/")
-	return baseURL + "/" + strings.TrimLeft(objectKey, "/"), nil
+	return signedURL, nil
 }

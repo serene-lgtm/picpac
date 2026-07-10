@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,6 +24,17 @@ import (
 type fakeAuthService struct {
 	err  error
 	user *domain.User
+}
+
+type fakeObjectURLSigner struct {
+	err error
+}
+
+func (s fakeObjectURLSigner) SignGetURL(_ context.Context, objectKey string) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return "https://signed.example/" + strings.TrimLeft(objectKey, "/") + "?Expires=3600&Signature=test", nil
 }
 
 func (s *fakeAuthService) SendPhoneCode(_ context.Context, _ request.SendPhoneCodeInput) error {
@@ -53,11 +66,39 @@ func (s *fakeAuthService) Me(_ context.Context, _ string) (*domain.User, error) 
 	return s.defaultUser(), nil
 }
 
+func (s *fakeAuthService) UpdateMyProfile(_ context.Context, _ string, input request.UpdateMyProfileInput) (*domain.User, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+
+	user := s.defaultUser()
+	user.Profile.Username = strings.TrimSpace(input.Username)
+	user.Profile.Gender = domain.UserGender(strings.TrimSpace(input.Gender))
+	if strings.TrimSpace(input.Birthday) != "" {
+		birthday, err := time.Parse("2006-01-02", input.Birthday)
+		if err != nil {
+			return nil, err
+		}
+		user.Profile.Birthday = &birthday
+	}
+	user.Profile.AvatarObjectKey = "user-avatar/user_1.png"
+
+	return user, nil
+}
+
 func (s *fakeAuthService) defaultUser() *domain.User {
 	if s.user != nil {
 		return s.user
 	}
-	return &domain.User{ID: bson.NewObjectID(), DisplayName: "用户8000", Status: domain.UserStatusCreated}
+	return &domain.User{
+		ID: bson.NewObjectID(),
+		Profile: domain.UserProfile{
+			Username:        "用户8000",
+			Gender:          "",
+			AvatarObjectKey: "user-avatar/default.jpg",
+		},
+		Status: domain.UserStatusCreated,
+	}
 }
 
 func TestSendPhoneCodeHandlerReturnsSent(t *testing.T) {
@@ -66,7 +107,7 @@ func TestSendPhoneCodeHandlerReturnsSent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	router := gin.New()
-	authHandler := NewAuthHandler(&fakeAuthService{})
+	authHandler := NewAuthHandler(&fakeAuthService{}, fakeObjectURLSigner{})
 	router.POST("/api/v1/auth/phone/code", authHandler.SendPhoneCode)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/phone/code", bytes.NewBufferString(`{"phone":"13800138000"}`))
@@ -87,7 +128,7 @@ func TestLoginWithPhoneHandlerReturnsTokens(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	router := gin.New()
-	authHandler := NewAuthHandler(&fakeAuthService{})
+	authHandler := NewAuthHandler(&fakeAuthService{}, fakeObjectURLSigner{})
 	router.POST("/api/v1/auth/phone/login", authHandler.LoginWithPhone)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/phone/login", bytes.NewBufferString(`{"phone":"13800138000","code":"123456"}`))
@@ -101,14 +142,20 @@ func TestLoginWithPhoneHandlerReturnsTokens(t *testing.T) {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		User         struct {
-			DisplayName string `json:"display_name"`
+			Profile struct {
+				Username  string `json:"username"`
+				AvatarURL string `json:"avatar_url"`
+			} `json:"profile"`
 		} `json:"user"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if resp.AccessToken == "" || resp.RefreshToken == "" || resp.User.DisplayName != "用户8000" {
+	if resp.AccessToken == "" || resp.RefreshToken == "" || resp.User.Profile.Username != "用户8000" {
 		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if resp.User.Profile.AvatarURL != "https://signed.example/user-avatar/default.jpg?Expires=3600&Signature=test" {
+		t.Fatalf("unexpected avatar_url: %s", resp.User.Profile.AvatarURL)
 	}
 }
 
@@ -118,7 +165,7 @@ func TestRefreshHandlerReturnsAccessTokenOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	router := gin.New()
-	authHandler := NewAuthHandler(&fakeAuthService{})
+	authHandler := NewAuthHandler(&fakeAuthService{}, fakeObjectURLSigner{})
 	router.POST("/api/v1/auth/refresh", authHandler.Refresh)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", bytes.NewBufferString(`{"refresh_token":"refresh"}`))
@@ -146,7 +193,7 @@ func TestLoginWithPhoneHandlerRejectsMissingCode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	router := gin.New()
-	authHandler := NewAuthHandler(&fakeAuthService{})
+	authHandler := NewAuthHandler(&fakeAuthService{}, fakeObjectURLSigner{})
 	router.POST("/api/v1/auth/phone/login", authHandler.LoginWithPhone)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/phone/login", bytes.NewBufferString(`{"phone":"13800138000"}`))
@@ -164,7 +211,7 @@ func TestAuthHandlerMapsTooFrequent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	router := gin.New()
-	authHandler := NewAuthHandler(&fakeAuthService{err: errors.New("phone code send too frequently")})
+	authHandler := NewAuthHandler(&fakeAuthService{err: errors.New("phone code send too frequently")}, fakeObjectURLSigner{})
 	router.POST("/api/v1/auth/phone/code", authHandler.SendPhoneCode)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/phone/code", bytes.NewBufferString(`{"phone":"13800138000"}`))
@@ -188,7 +235,7 @@ func TestMeHandlerReturnsCurrentUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAccessToken returned error: %v", err)
 	}
-	authHandler := NewAuthHandler(&fakeAuthService{user: &domain.User{ID: userID, DisplayName: "用户8000", Status: domain.UserStatusCreated}})
+	authHandler := NewAuthHandler(&fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}}, fakeObjectURLSigner{})
 	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
 	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
 
@@ -204,13 +251,64 @@ func TestMeHandlerReturnsCurrentUser(t *testing.T) {
 	}
 }
 
+func TestUpdateMyProfileHandlerReturnsUpdatedUser(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	tokenService := service.NewTokenService("test-secret", time.Hour)
+	userID := bson.NewObjectID()
+	token, err := tokenService.CreateAccessToken(userID)
+	if err != nil {
+		t.Fatalf("CreateAccessToken returned error: %v", err)
+	}
+	authHandler := NewAuthHandler(&fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "旧用户名", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}}, fakeObjectURLSigner{})
+	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
+	router.PUT("/api/v1/me/profile", authMiddleware.RequireAuth(), authHandler.UpdateMyProfile)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("username", "新用户"); err != nil {
+		t.Fatalf("WriteField returned error: %v", err)
+	}
+	if err := writer.WriteField("gender", "female"); err != nil {
+		t.Fatalf("WriteField returned error: %v", err)
+	}
+	if err := writer.WriteField("birthday", "1998-08-20"); err != nil {
+		t.Fatalf("WriteField returned error: %v", err)
+	}
+	part, err := writer.CreateFormFile("avatar", "avatar.png")
+	if err != nil {
+		t.Fatalf("CreateFormFile returned error: %v", err)
+	}
+	if _, err := io.Copy(part, bytes.NewReader([]byte("fake image"))); err != nil {
+		t.Fatalf("Copy returned error: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/me/profile", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `"username":"新用户"`) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
 func TestAuthMiddlewareRejectsMissingToken(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	router := gin.New()
-	authHandler := NewAuthHandler(&fakeAuthService{})
+	authHandler := NewAuthHandler(&fakeAuthService{}, fakeObjectURLSigner{})
 	authMiddleware := NewAuthMiddleware(service.NewTokenService("test-secret", time.Hour), authHandler.svc)
 	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
 
@@ -234,7 +332,7 @@ func TestAuthMiddlewareRejectsDeletedUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAccessToken returned error: %v", err)
 	}
-	authHandler := NewAuthHandler(&fakeAuthService{err: errors.New("user not found")})
+	authHandler := NewAuthHandler(&fakeAuthService{err: errors.New("user not found")}, fakeObjectURLSigner{})
 	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
 	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
 

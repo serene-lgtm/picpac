@@ -155,7 +155,7 @@ func newAuthenticatedChecklistRouter(t *testing.T, checklistService *fakeCheckli
 	if err != nil {
 		t.Fatalf("CreateAccessToken returned error: %v", err)
 	}
-	authMiddleware := NewAuthMiddleware(tokenService, &fakeAuthService{user: &domain.User{ID: userID, DisplayName: "用户8000", Status: domain.UserStatusCreated}})
+	authMiddleware := NewAuthMiddleware(tokenService, &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}})
 	checklistRoutes := router.Group("/api/v1/checklist")
 	checklistRoutes.Use(authMiddleware.RequireAuth())
 	checklistRoutes.POST("", checklistHandler.CreateChecklist)

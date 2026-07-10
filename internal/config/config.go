@@ -10,7 +10,7 @@ import (
 // Configuration defines the application runtime configuration loaded from config.json.
 type Configuration struct {
 	Server    ServerConfig    `json:"server"`
-	COS       COSConfig       `json:"cos"`
+	OSS       OSSConfig       `json:"oss"`
 	Dashscope DashscopeConfig `json:"dashscope"`
 	CORS      CORSConfig      `json:"cors"`
 	Mongo     MongoConfig     `json:"mongo"`
@@ -22,11 +22,14 @@ type ServerConfig struct {
 	Port string `json:"port"`
 }
 
-// COSConfig defines Tencent COS access settings.
-type COSConfig struct {
-	BucketURL string `json:"bucket_url"`
-	SecretID  string `json:"secret_id"`
-	SecretKey string `json:"secret_key"`
+// OSSConfig defines Alibaba Cloud OSS access settings.
+type OSSConfig struct {
+	Endpoint            string `json:"endpoint"`
+	BucketName          string `json:"bucket_name"`
+	AccessKeyID         string `json:"access_key_id"`
+	AccessKeySecret     string `json:"access_key_secret"`
+	PublicBaseURL       string `json:"public_base_url"`
+	SignedURLTTLSeconds int64  `json:"signed_url_ttl_seconds"`
 }
 
 // DashscopeConfig defines DashScope access settings.
@@ -89,12 +92,16 @@ func validate(cfg *Configuration) error {
 	switch {
 	case strings.TrimSpace(cfg.Server.Port) == "":
 		return fmt.Errorf("invalid config: server.port is required")
-	case strings.TrimSpace(cfg.COS.BucketURL) == "":
-		return fmt.Errorf("invalid config: cos.bucket_url is required")
-	case strings.TrimSpace(cfg.COS.SecretID) == "":
-		return fmt.Errorf("invalid config: cos.secret_id is required")
-	case strings.TrimSpace(cfg.COS.SecretKey) == "":
-		return fmt.Errorf("invalid config: cos.secret_key is required")
+	case strings.TrimSpace(cfg.OSS.Endpoint) == "":
+		return fmt.Errorf("invalid config: oss.endpoint is required")
+	case strings.TrimSpace(cfg.OSS.BucketName) == "":
+		return fmt.Errorf("invalid config: oss.bucket_name is required")
+	case strings.TrimSpace(cfg.OSS.AccessKeyID) == "":
+		return fmt.Errorf("invalid config: oss.access_key_id is required")
+	case strings.TrimSpace(cfg.OSS.AccessKeySecret) == "":
+		return fmt.Errorf("invalid config: oss.access_key_secret is required")
+	case strings.TrimSpace(cfg.OSS.PublicBaseURL) == "":
+		return fmt.Errorf("invalid config: oss.public_base_url is required")
 	case strings.TrimSpace(cfg.Dashscope.APIKey) == "":
 		return fmt.Errorf("invalid config: dashscope.api_key is required")
 	case strings.TrimSpace(cfg.Dashscope.ImageModel) == "":
@@ -107,6 +114,9 @@ func validate(cfg *Configuration) error {
 
 	if cfg.Mongo.ConnectTimeoutSeconds <= 0 {
 		cfg.Mongo.ConnectTimeoutSeconds = 10
+	}
+	if cfg.OSS.SignedURLTTLSeconds <= 0 {
+		cfg.OSS.SignedURLTTLSeconds = 3600
 	}
 	if strings.TrimSpace(cfg.Auth.AccessTokenSecret) == "" {
 		return fmt.Errorf("invalid config: auth.access_token_secret is required")

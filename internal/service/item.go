@@ -59,24 +59,24 @@ func (s *itemService) CreateItem(ctx context.Context, input request.CreateItemIn
 
 	now := time.Now().UTC()
 	item := &domain.Item{
-		ID:                 bson.NewObjectID(),
-		UserID:             userID,
-		Name:               name,
-		Description:        strings.TrimSpace(input.Description),
-		SourceImageURL:     "",
-		ImageThumbnailURL:  "",
-		AIRenderedImageURL: "",
-		Status:             domain.ItemStatusCreated,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                       bson.NewObjectID(),
+		UserID:                   userID,
+		Name:                     name,
+		Description:              strings.TrimSpace(input.Description),
+		SourceImageObjectKey:     "",
+		ImageThumbnailObjectKey:  "",
+		AIRenderedImageObjectKey: "",
+		Status:                   domain.ItemStatusCreated,
+		CreatedAt:                now,
+		UpdatedAt:                now,
 	}
 
 	if input.File != nil {
-		imageURL, err := s.uploadItemImage(ctx, item.ID, input.FileName, input.File)
+		objectKey, err := s.uploadItemImage(ctx, item.ID, input.FileName, input.File)
 		if err != nil {
 			return nil, err
 		}
-		item.SourceImageURL = imageURL
+		item.SourceImageObjectKey = objectKey
 	}
 
 	if err := s.repo.Create(ctx, item); err != nil {
@@ -157,11 +157,11 @@ func (s *itemService) UpdateItem(ctx context.Context, itemID string, userID stri
 	item.UpdatedAt = time.Now().UTC()
 
 	if input.File != nil {
-		imageURL, err := s.uploadItemImage(ctx, item.ID, input.FileName, input.File)
+		objectKey, err := s.uploadItemImage(ctx, item.ID, input.FileName, input.File)
 		if err != nil {
 			return nil, err
 		}
-		item.SourceImageURL = imageURL
+		item.SourceImageObjectKey = objectKey
 	}
 
 	if err := s.repo.Update(ctx, item); err != nil {
@@ -225,12 +225,11 @@ func (s *itemService) uploadItemImage(ctx context.Context, itemID bson.ObjectID,
 	}
 
 	objectKey := buildItemObjectKey(itemID, fileName, contentType)
-	imageURL, err := s.uploader.Upload(ctx, objectKey, contentType, bytes.NewReader(body))
-	if err != nil {
+	if err := s.uploader.Upload(ctx, objectKey, contentType, bytes.NewReader(body)); err != nil {
 		return "", fmt.Errorf("upload item image failed: %w", err)
 	}
 
-	return imageURL, nil
+	return objectKey, nil
 }
 
 func parseObjectID(value string) (bson.ObjectID, error) {

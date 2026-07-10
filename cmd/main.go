@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,8 +11,7 @@ import (
 	"pack_mate/internal/config"
 	mongodb "pack_mate/internal/repository/mongodb"
 
-	"github.com/tencentyun/cos-go-sdk-v5"
-	"github.com/tencentyun/cos-go-sdk-v5/debug"
+	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 )
 
 func main() {
@@ -23,7 +20,7 @@ func main() {
 		panic(err)
 	}
 
-	client, bucketURL, err := newCOSClient(appCfg)
+	bucket, err := newOSSBucket(appCfg)
 	if err != nil {
 		panic(err)
 	}
@@ -41,7 +38,7 @@ func main() {
 		port = "8080"
 	}
 
-	router := newRouter(appCfg, client, bucketURL, mongoConn.Database)
+	router := newRouter(appCfg, bucket, mongoConn.Database)
 
 	if err := router.Run(":" + port); err != nil {
 		panic(err)
@@ -85,38 +82,35 @@ func loadConfig() (*config.Configuration, error) {
 	return nil, fmt.Errorf("load config.json: %w", lastErr)
 }
 
-func newCOSClient(cfg *config.Configuration) (*cos.Client, *url.URL, error) {
-	bucketURLRaw := strings.TrimSpace(cfg.COS.BucketURL)
-	secretID := strings.TrimSpace(cfg.COS.SecretID)
-	secretKey := strings.TrimSpace(cfg.COS.SecretKey)
+func newOSSBucket(cfg *config.Configuration) (*oss.Bucket, error) {
+	endpoint := strings.TrimSpace(cfg.OSS.Endpoint)
+	bucketName := strings.TrimSpace(cfg.OSS.BucketName)
+	accessKeyID := strings.TrimSpace(cfg.OSS.AccessKeyID)
+	accessKeySecret := strings.TrimSpace(cfg.OSS.AccessKeySecret)
+	publicBaseURL := strings.TrimRight(strings.TrimSpace(cfg.OSS.PublicBaseURL), "/")
 
 	switch {
-	case bucketURLRaw == "":
-		return nil, nil, errors.New("missing COS_BUCKET_URL")
-	case secretID == "":
-		return nil, nil, errors.New("missing SECRETID")
-	case secretKey == "":
-		return nil, nil, errors.New("missing SECRETKEY")
+	case endpoint == "":
+		return nil, errors.New("missing OSS_ENDPOINT")
+	case bucketName == "":
+		return nil, errors.New("missing OSS_BUCKET_NAME")
+	case accessKeyID == "":
+		return nil, errors.New("missing OSS_ACCESS_KEY_ID")
+	case accessKeySecret == "":
+		return nil, errors.New("missing OSS_ACCESS_KEY_SECRET")
+	case publicBaseURL == "":
+		return nil, errors.New("missing OSS_PUBLIC_BASE_URL")
 	}
 
-	bucketURL, err := url.Parse(bucketURLRaw)
+	client, err := oss.New(endpoint, accessKeyID, accessKeySecret)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parse COS_BUCKET_URL: %w", err)
+		return nil, fmt.Errorf("create OSS client: %w", err)
 	}
 
-	baseURL := &cos.BaseURL{BucketURL: bucketURL}
-	client := cos.NewClient(baseURL, &http.Client{
-		Transport: &cos.AuthorizationTransport{
-			SecretID:  secretID,
-			SecretKey: secretKey,
-			Transport: &debug.DebugRequestTransport{
-				RequestHeader:  true,
-				RequestBody:    false,
-				ResponseHeader: true,
-				ResponseBody:   false,
-			},
-		},
-	})
+	bucket, err := client.Bucket(bucketName)
+	if err != nil {
+		return nil, fmt.Errorf("create OSS bucket: %w", err)
+	}
 
-	return client, bucketURL, nil
+	return bucket, nil
 }

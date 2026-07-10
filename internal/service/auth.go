@@ -1,12 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"strings"
 	"time"
@@ -28,6 +30,9 @@ type AuthResult struct {
 	User         *domain.User
 }
 
+const userAvatarObjectPrefix = "user-avatar"
+const defaultUserAvatarObjectKey = "user-avatar/default.jpg"
+
 // RefreshResult contains a refreshed access token.
 type RefreshResult struct {
 	AccessToken string
@@ -40,6 +45,7 @@ type AuthService interface {
 	Refresh(ctx context.Context, input request.RefreshTokenInput) (*RefreshResult, error)
 	Logout(ctx context.Context, input request.LogoutInput) error
 	Me(ctx context.Context, userID string) (*domain.User, error)
+	UpdateMyProfile(ctx context.Context, userID string, input request.UpdateMyProfileInput) (*domain.User, error)
 }
 
 type authService struct {
@@ -47,6 +53,7 @@ type authService struct {
 	identities      repository.AuthIdentityRepository
 	phoneCodes      repository.PhoneVerificationCodeRepository
 	refreshTokens   repository.RefreshTokenRepository
+	uploader        UploadService
 	sms             SMSService
 	tokens          TokenService
 	phoneCodeConfig config.PhoneCodeConfig
@@ -59,6 +66,7 @@ func NewAuthService(
 	identities repository.AuthIdentityRepository,
 	phoneCodes repository.PhoneVerificationCodeRepository,
 	refreshTokens repository.RefreshTokenRepository,
+	uploader UploadService,
 	sms SMSService,
 	tokens TokenService,
 	authConfig config.AuthConfig,
@@ -68,6 +76,7 @@ func NewAuthService(
 		identities:      identities,
 		phoneCodes:      phoneCodes,
 		refreshTokens:   refreshTokens,
+		uploader:        uploader,
 		sms:             sms,
 		tokens:          tokens,
 		phoneCodeConfig: authConfig.PhoneCode,
@@ -225,6 +234,63 @@ func (s *authService) Me(ctx context.Context, userID string) (*domain.User, erro
 	return s.getActiveUserByID(ctx, objectID)
 }
 
+// UpdateMyProfile updates the current user profile.
+func (s *authService) UpdateMyProfile(ctx context.Context, userID string, input request.UpdateMyProfileInput) (*domain.User, error) {
+	objectID, err := parseObjectID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+
+	user, err := s.getActiveUserByID(ctx, objectID)
+	if err != nil {
+		return nil, err
+	}
+
+	username := strings.TrimSpace(input.Username)
+	if username == "" {
+		return nil, fmt.Errorf("username is required")
+	}
+	if len([]rune(username)) > 32 {
+		return nil, fmt.Errorf("username is too long")
+	}
+
+	gender, err := parseRequiredUserGender(input.Gender)
+	if err != nil {
+		return nil, err
+	}
+
+	birthday, err := parseOptionalBirthday(input.Birthday)
+	if err != nil {
+		return nil, err
+	}
+
+	avatarObjectKey := strings.TrimSpace(user.Profile.AvatarObjectKey)
+	if input.File != nil {
+		avatarObjectKey, err = s.uploadUserAvatar(ctx, user.ID, input.FileName, input.File)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if avatarObjectKey == "" {
+		return nil, fmt.Errorf("avatar is required")
+	}
+
+	user.Profile.Username = username
+	user.Profile.Gender = gender
+	user.Profile.Birthday = birthday
+	user.Profile.AvatarObjectKey = avatarObjectKey
+	user.UpdatedAt = time.Now().UTC()
+
+	if err := s.users.Update(ctx, user); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, fmt.Errorf("update user profile failed: %w", err)
+	}
+
+	return user, nil
+}
+
 func (s *authService) getOrCreatePhoneUser(ctx context.Context, phone string) (*domain.User, error) {
 	identity, err := s.identities.GetByProviderAndIdentifier(ctx, domain.AuthProviderPhone, phone)
 	if err == nil {
@@ -236,11 +302,16 @@ func (s *authService) getOrCreatePhoneUser(ctx context.Context, phone string) (*
 
 	now := time.Now().UTC()
 	user := &domain.User{
-		ID:          bson.NewObjectID(),
-		DisplayName: newDefaultDisplayName(phone),
-		Status:      domain.UserStatusCreated,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID: bson.NewObjectID(),
+		Profile: domain.UserProfile{
+			Username:        newDefaultUsername(phone),
+			Gender:          "",
+			Birthday:        nil,
+			AvatarObjectKey: defaultUserAvatarObjectKey,
+		},
+		Status:    domain.UserStatusCreated,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	if err := s.users.Create(ctx, user); err != nil {
 		return nil, fmt.Errorf("create user failed: %w", err)
@@ -373,9 +444,67 @@ func hashPhoneCode(phone string, code string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func newDefaultDisplayName(phone string) string {
-	if len(phone) <= 4 {
-		return "用户" + phone
+func newDefaultUsername(phone string) string {
+	return "user" + digitsOnly(phone)
+}
+
+func parseRequiredUserGender(value string) (domain.UserGender, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", fmt.Errorf("gender is required")
 	}
-	return "用户" + phone[len(phone)-4:]
+
+	switch domain.UserGender(trimmed) {
+	case domain.UserGenderMale, domain.UserGenderFemale, domain.UserGenderPrivate:
+		return domain.UserGender(trimmed), nil
+	default:
+		return "", fmt.Errorf("gender is invalid")
+	}
+}
+
+func parseOptionalBirthday(value string) (*time.Time, error) {
+	birthday := strings.TrimSpace(value)
+	if birthday == "" {
+		return nil, nil
+	}
+
+	parsed, err := time.Parse("2006-01-02", birthday)
+	if err != nil {
+		return nil, fmt.Errorf("birthday is invalid")
+	}
+	if parsed.After(time.Now().UTC()) {
+		return nil, fmt.Errorf("birthday is invalid")
+	}
+
+	return &parsed, nil
+}
+
+func digitsOnly(value string) string {
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for _, r := range value {
+		if unicode.IsDigit(r) {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
+}
+
+func (s *authService) uploadUserAvatar(ctx context.Context, userID bson.ObjectID, fileName string, file io.ReadSeeker) (string, error) {
+	body, contentType, err := readUpload(file)
+	if err != nil {
+		return "", fmt.Errorf("invalid input")
+	}
+
+	objectKey := buildUserAvatarObjectKey(userID, fileName, contentType)
+	if err := s.uploader.Upload(ctx, objectKey, contentType, bytes.NewReader(body)); err != nil {
+		return "", fmt.Errorf("upload user avatar failed: %w", err)
+	}
+
+	return objectKey, nil
+}
+
+func buildUserAvatarObjectKey(userID bson.ObjectID, fileName string, contentType string) string {
+	ext := extensionForUpload(fileName, contentType)
+	return fmt.Sprintf("%s/user_%s%s", userAvatarObjectPrefix, userID.Hex(), ext)
 }

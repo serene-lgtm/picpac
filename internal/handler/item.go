@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -14,12 +16,13 @@ import (
 
 // ItemHandler handles item HTTP requests.
 type ItemHandler struct {
-	svc service.ItemService
+	svc       service.ItemService
+	urlSigner service.ObjectURLSigner
 }
 
 // NewItemHandler creates an item handler.
-func NewItemHandler(svc service.ItemService) *ItemHandler {
-	return &ItemHandler{svc: svc}
+func NewItemHandler(svc service.ItemService, urlSigner service.ObjectURLSigner) *ItemHandler {
+	return &ItemHandler{svc: svc, urlSigner: urlSigner}
 }
 
 // CreateItem handles item creation requests.
@@ -54,7 +57,13 @@ func (h *ItemHandler) CreateItem(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, buildItemResponse(item))
+	itemResponse, err := h.buildItemResponse(c.Request.Context(), item)
+	if err != nil {
+		respondItemError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, itemResponse)
 }
 
 // ListItems handles item list requests.
@@ -84,7 +93,12 @@ func (h *ItemHandler) ListItems(c *gin.Context) {
 
 	responses := make([]response.ItemResponse, 0, len(items))
 	for _, item := range items {
-		responses = append(responses, buildItemResponse(&item))
+		itemResponse, err := h.buildItemResponse(c.Request.Context(), &item)
+		if err != nil {
+			respondItemError(c, err)
+			return
+		}
+		responses = append(responses, itemResponse)
 	}
 
 	c.JSON(http.StatusOK, response.ListItemsResponse{Items: responses})
@@ -110,7 +124,13 @@ func (h *ItemHandler) GetItem(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, buildItemResponse(item))
+	itemResponse, err := h.buildItemResponse(c.Request.Context(), item)
+	if err != nil {
+		respondItemError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, itemResponse)
 }
 
 // UpdateItem handles item update requests.
@@ -150,7 +170,13 @@ func (h *ItemHandler) UpdateItem(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, buildItemResponse(item))
+	itemResponse, err := h.buildItemResponse(c.Request.Context(), item)
+	if err != nil {
+		respondItemError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, itemResponse)
 }
 
 // DeleteItem handles item deletion requests.
@@ -188,6 +214,8 @@ func respondItemError(c *gin.Context, err error) {
 		status = http.StatusNotFound
 	case strings.Contains(message, "upload item image failed"):
 		status = http.StatusBadGateway
+	case strings.Contains(message, "sign item image url failed"):
+		status = http.StatusInternalServerError
 	case strings.Contains(message, "create item failed"),
 		strings.Contains(message, "list items failed"),
 		strings.Contains(message, "get item failed"),
@@ -198,15 +226,45 @@ func respondItemError(c *gin.Context, err error) {
 	c.JSON(status, gin.H{"error": message})
 }
 
-func buildItemResponse(item *domain.Item) response.ItemResponse {
+func (h *ItemHandler) buildItemResponse(ctx context.Context, item *domain.Item) (response.ItemResponse, error) {
+	sourceImageURL, err := h.signObjectURL(ctx, item.SourceImageObjectKey, "source image")
+	if err != nil {
+		return response.ItemResponse{}, err
+	}
+	imageThumbnailURL, err := h.signObjectURL(ctx, item.ImageThumbnailObjectKey, "image thumbnail")
+	if err != nil {
+		return response.ItemResponse{}, err
+	}
+	aiRenderedImageURL, err := h.signObjectURL(ctx, item.AIRenderedImageObjectKey, "ai rendered image")
+	if err != nil {
+		return response.ItemResponse{}, err
+	}
+
 	return response.ItemResponse{
 		ID:                 item.ID.Hex(),
 		UserID:             item.UserID.Hex(),
 		Name:               item.Name,
 		Description:        item.Description,
-		SourceImageURL:     item.SourceImageURL,
-		ImageThumbnailURL:  item.ImageThumbnailURL,
-		AIRenderedImageURL: item.AIRenderedImageURL,
+		SourceImageURL:     sourceImageURL,
+		ImageThumbnailURL:  imageThumbnailURL,
+		AIRenderedImageURL: aiRenderedImageURL,
 		Status:             string(item.Status),
+	}, nil
+}
+
+func (h *ItemHandler) signObjectURL(ctx context.Context, objectKey string, label string) (string, error) {
+	objectKey = strings.TrimSpace(objectKey)
+	if objectKey == "" {
+		return "", nil
 	}
+	if h.urlSigner == nil {
+		return "", fmt.Errorf("sign item image url failed: url signer is not configured")
+	}
+
+	signedURL, err := h.urlSigner.SignGetURL(ctx, objectKey)
+	if err != nil {
+		return "", fmt.Errorf("sign item image url failed: %s: %w", label, err)
+	}
+
+	return signedURL, nil
 }

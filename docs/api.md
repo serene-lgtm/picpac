@@ -12,8 +12,13 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - 后端：Golang + Gin
 - 前端：Flutter
 - 数据库：MongoDB
-- 图片存储：腾讯云 COS
+- 图片存储：阿里云 OSS
 - API 风格：RESTful
+
+图片 URL 约定：
+- 接口响应中的 `avatar_url`、`source_image_url`、`image_thumbnail_url`、`ai_rendered_image_url` 是临时 signed URL，会过期。
+- 前端不应长期持久化这些 URL；如果图片访问过期，应重新请求相关列表/详情/用户接口获取新 URL。
+- 后端持久化 OSS object key，不把带 `Expires`、`OSSAccessKeyId`、`Signature` 的 URL 写入 MongoDB。
 
 ## Formal APIs
 
@@ -86,8 +91,12 @@ picpac 是一个个人物品管理手机 app 的后端服务。
   "refresh_token": "...",
   "user": {
     "id": "6821c0c1f1b2f4d5a6b7c8d1",
-    "display_name": "用户8000",
-    "avatar_url": "",
+    "profile": {
+      "username": "user8613800138000",
+      "gender": "",
+      "birthday": "",
+      "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/user-avatar/default.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
+    },
     "status": "created"
   }
 }
@@ -97,7 +106,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `400`: 缺少 `phone`、缺少 `code`、手机号格式非法、验证码非法或超过尝试次数
 - `404`: 已绑定身份对应的 User 不存在
 - `409`: 创建登录身份发生冲突且无法恢复
-- `500`: 创建 User、AuthIdentity 或 token 失败
+- `500`: 创建 User、AuthIdentity、token 或生成头像访问 URL 失败
 
 ### Refresh Auth Token
 
@@ -171,8 +180,12 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```json
 {
   "id": "6821c0c1f1b2f4d5a6b7c8d1",
-  "display_name": "用户8000",
-  "avatar_url": "",
+  "profile": {
+    "username": "user8613800138000",
+    "gender": "",
+    "birthday": "",
+    "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/user-avatar/default.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
+  },
   "status": "created"
 }
 ```
@@ -180,7 +193,56 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 失败响应：
 - `401`: 缺少 access token，access token 非法或已过期
 - `404`: User 不存在
-- `500`: 查询 User 失败
+- `500`: 查询 User 或生成头像访问 URL 失败
+
+### Update My Profile
+
+`PUT /api/v1/me/profile`
+
+用途：
+- 更新当前登录用户的 profile
+- 后端会接收头像文件并上传到阿里云 OSS，MongoDB 只保存头像 object key，不保存临时 URL
+- 如果不上传新的头像文件，会保留当前已有的头像 object key；首次登录创建的默认头像 object key 是 `user-avatar/default.jpg`
+
+请求头：
+- `Authorization: Bearer <access_token>`
+
+请求类型：
+- `multipart/form-data`
+
+请求字段：
+- `username`: string，必填；去首尾空格后长度 1-32
+- `gender`: string，必填；枚举值：`male`、`female`、`private`
+- `birthday`: string，可选；格式固定为 `YYYY-MM-DD`；传空字符串表示清空生日
+- `avatar`: 文件，可选；必须是有效图片文件；不传则保留当前头像
+
+请求示例：
+- `username=packmate_user`
+- `gender=female`
+- `birthday=1998-08-20`
+- `avatar=<image file>` 可选
+
+成功响应：
+
+```json
+{
+  "id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "profile": {
+    "username": "packmate_user",
+    "gender": "female",
+    "birthday": "1998-08-20",
+    "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/user-avatar/user_6821c0c1f1b2f4d5a6b7c8d1.png?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
+  },
+  "status": "created"
+}
+```
+
+失败响应：
+- `400`: 缺少 `username`、`gender`，`username` 超长、`gender` 非法、`birthday` 格式非法，或上传文件不是有效图片
+- `401`: 缺少 access token，access token 非法或已过期
+- `404`: User 不存在
+- `502`: 上传头像到 OSS 失败
+- `500`: 更新用户资料或生成头像访问 URL 失败
 
 ### Create Item
 
@@ -188,7 +250,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 创建一个用户私有的 item
-- 如果上传图片，后端会先上传到腾讯云 COS，再把图片 URL 存入 MongoDB
+- 如果上传图片，后端会先上传到阿里云 OSS，MongoDB 只保存图片 object key，不保存临时 URL
 - 新创建的 item 会默认写入 `created` 状态
 - `user_id` 从当前登录用户读取，不接受前端显式传入
 
@@ -209,7 +271,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
   "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
   "name": "黑色双肩包",
   "description": "日常出差用",
-  "source_image_url": "https://xxx.cos.../items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg",
+  "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
   "image_thumbnail_url": "",
   "ai_rendered_image_url": "",
   "status": "created"
@@ -220,7 +282,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `400`: 缺少 `name`，或上传文件不是有效图片
 - `401`: access token 缺失、非法或过期
 - `502`: 图片上传失败
-- `500`: 创建 item 失败
+- `500`: 创建 item 或生成图片访问 URL 失败
 
 ### List Items
 
@@ -256,7 +318,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
       "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
       "name": "黑色双肩包",
       "description": "日常出差用",
-      "source_image_url": "https://xxx.cos.../items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg",
+      "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
       "image_thumbnail_url": "",
       "ai_rendered_image_url": "",
       "status": "created"
@@ -276,7 +338,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 失败响应：
 - `400`: `q` 为空/超过最大长度
 - `401`: access token 缺失、非法或过期
-- `500`: 查询 item 列表失败
+- `500`: 查询 item 列表或生成图片访问 URL 失败
 
 ### Get Item
 
@@ -301,7 +363,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
   "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
   "name": "黑色双肩包",
   "description": "日常出差用",
-  "source_image_url": "https://xxx.cos.../items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg",
+  "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
   "image_thumbnail_url": "",
   "ai_rendered_image_url": "",
   "status": "created"
@@ -312,7 +374,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `400`: 缺少 `item_id`，或 `item_id` 不是合法 ObjectID
 - `401`: access token 缺失、非法或过期
 - `404`: item 不存在
-- `500`: 查询 item 失败
+- `500`: 查询 item 或生成图片访问 URL 失败
 
 ### Update Item
 
@@ -321,7 +383,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 用途：
 - 更新单个 item 的名称、描述和可选图片
 - 只允许更新当前登录用户自己的 item
-- 如果上传新图片，会覆盖 `source_image_url`
+- 如果上传新图片，会覆盖后端保存的 source image object key；响应里的 `source_image_url` 会返回新的临时 signed URL
 - 如果 item 已被逻辑删除，则不允许更新
 
 请求类型：
@@ -346,7 +408,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
   "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
   "name": "黑色双肩包升级版",
   "description": "更新后的描述",
-  "source_image_url": "https://xxx.cos.../items/item_6821c0c1f1b2f4d5a6b7c8d9/source.png",
+  "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.png?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
   "image_thumbnail_url": "",
   "ai_rendered_image_url": "",
   "status": "created"
@@ -358,7 +420,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `401`: access token 缺失、非法或过期
 - `404`: item 不存在
 - `502`: 图片上传失败
-- `500`: 更新 item 失败
+- `500`: 更新 item 或生成图片访问 URL 失败
 
 ### Delete Item
 

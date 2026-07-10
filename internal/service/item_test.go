@@ -106,15 +106,16 @@ func (r *fakeItemRepository) DeleteByID(_ context.Context, itemID bson.ObjectID)
 }
 
 type fakeUploadService struct {
-	url string
-	err error
+	objectKey string
+	err       error
 }
 
-func (s *fakeUploadService) Upload(_ context.Context, _ string, _ string, _ io.Reader) (string, error) {
+func (s *fakeUploadService) Upload(_ context.Context, objectKey string, _ string, _ io.Reader) error {
 	if s.err != nil {
-		return "", s.err
+		return s.err
 	}
-	return s.url, nil
+	s.objectKey = objectKey
+	return nil
 }
 
 func testPNGBytes() []byte {
@@ -152,7 +153,7 @@ func TestCreateItemStoresItemWithoutImage(t *testing.T) {
 	if item.UserID != userID {
 		t.Fatalf("expected user id %s, got %s", userID.Hex(), item.UserID.Hex())
 	}
-	if item.Name != "黑色双肩包" || item.SourceImageURL != "" {
+	if item.Name != "黑色双肩包" || item.SourceImageObjectKey != "" {
 		t.Fatalf("unexpected item: %+v", item)
 	}
 	if item.Status != domain.ItemStatusCreated {
@@ -165,7 +166,7 @@ func TestCreateItemUploadsImageWhenProvided(t *testing.T) {
 
 	userID := bson.NewObjectID()
 	repo := &fakeItemRepository{}
-	uploader := &fakeUploadService{url: "https://cos.example/items/item_1/source.jpg"}
+	uploader := &fakeUploadService{}
 	svc := NewItemService(repo, uploader)
 
 	item, err := svc.CreateItem(context.Background(), request.CreateItemInput{
@@ -177,8 +178,11 @@ func TestCreateItemUploadsImageWhenProvided(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateItem returned error: %v", err)
 	}
-	if item.SourceImageURL == "" {
-		t.Fatalf("expected source image url to be populated")
+	if item.SourceImageObjectKey == "" {
+		t.Fatalf("expected source image object key to be populated")
+	}
+	if item.SourceImageObjectKey != uploader.objectKey {
+		t.Fatalf("expected source image object key %s, got %s", uploader.objectKey, item.SourceImageObjectKey)
 	}
 }
 
@@ -396,17 +400,16 @@ func TestUpdateItemReplacesFieldsAndOptionalImage(t *testing.T) {
 	userID := bson.NewObjectID()
 	repo := &fakeItemRepository{
 		got: &domain.Item{
-			ID:                itemID,
-			UserID:            userID,
-			Name:              "旧名称",
-			Description:       "old",
-			SourceImageURL:    "old-url",
-			ImageThumbnailURL: "",
-			Status:            domain.ItemStatusCreated,
-			UpdatedAt:         time.Now().Add(-time.Hour),
+			ID:                   itemID,
+			UserID:               userID,
+			Name:                 "旧名称",
+			Description:          "old",
+			SourceImageObjectKey: "items/item_old/source.jpg",
+			Status:               domain.ItemStatusCreated,
+			UpdatedAt:            time.Now().Add(-time.Hour),
 		},
 	}
-	uploader := &fakeUploadService{url: "https://cos.example/items/item_1/source.png"}
+	uploader := &fakeUploadService{}
 	svc := NewItemService(repo, uploader)
 
 	item, err := svc.UpdateItem(context.Background(), itemID.Hex(), userID.Hex(), request.UpdateItemInput{
@@ -420,8 +423,8 @@ func TestUpdateItemReplacesFieldsAndOptionalImage(t *testing.T) {
 	if repo.updated == nil || repo.updated.Name != "新名称" {
 		t.Fatalf("expected repository update to be called")
 	}
-	if item.SourceImageURL != uploader.url {
-		t.Fatalf("expected image url to be replaced, got %s", item.SourceImageURL)
+	if item.SourceImageObjectKey != uploader.objectKey {
+		t.Fatalf("expected image object key %s, got %s", uploader.objectKey, item.SourceImageObjectKey)
 	}
 }
 
