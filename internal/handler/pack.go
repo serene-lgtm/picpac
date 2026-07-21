@@ -116,8 +116,8 @@ func (h *PackHandler) GetPack(c *gin.Context) {
 	c.JSON(http.StatusOK, buildPackResponse(pack))
 }
 
-// UpdatePack handles pack update requests.
-func (h *PackHandler) UpdatePack(c *gin.Context) {
+// UpdatePackProfile handles pack profile update requests.
+func (h *PackHandler) UpdatePackProfile(c *gin.Context) {
 	userID, ok := CurrentUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
@@ -134,7 +134,7 @@ func (h *PackHandler) UpdatePack(c *gin.Context) {
 		return
 	}
 
-	var input request.UpdatePackInput
+	var input request.UpdatePackProfileInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
 		return
@@ -145,12 +145,89 @@ func (h *PackHandler) UpdatePack(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 		return
 	}
+	pack, err := h.svc.UpdatePackProfile(c.Request.Context(), packID, userID, input)
+	if err != nil {
+		respondPackError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, buildPackResponse(pack))
+}
+
+// AddPackItems handles pack item add requests.
+func (h *PackHandler) AddPackItems(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
+	packID := strings.TrimSpace(c.Param("pack_id"))
+	if packID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pack_id is required"})
+		return
+	}
+	if !validateRequiredObjectID(packID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pack_id is invalid"})
+		return
+	}
+
+	var input request.AddPackItemsInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+		return
+	}
+	if len(input.Items) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "items are required"})
+		return
+	}
 	if !validateObjectIDs(input.Items) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "items contains invalid item_id"})
 		return
 	}
 
-	pack, err := h.svc.UpdatePack(c.Request.Context(), packID, userID, input)
+	pack, err := h.svc.AddPackItems(c.Request.Context(), packID, userID, input)
+	if err != nil {
+		respondPackError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, buildPackResponse(pack))
+}
+
+// RemovePackItems handles pack item remove requests.
+func (h *PackHandler) RemovePackItems(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
+	packID := strings.TrimSpace(c.Param("pack_id"))
+	if packID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pack_id is required"})
+		return
+	}
+	if !validateRequiredObjectID(packID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pack_id is invalid"})
+		return
+	}
+
+	var input request.RemovePackItemsInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+		return
+	}
+	if len(input.Items) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "items are required"})
+		return
+	}
+	if !validateObjectIDs(input.Items) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "items contains invalid item_id"})
+		return
+	}
+
+	pack, err := h.svc.RemovePackItems(c.Request.Context(), packID, userID, input)
 	if err != nil {
 		respondPackError(c, err)
 		return
@@ -191,6 +268,7 @@ func respondPackError(c *gin.Context, err error) {
 	switch {
 	case strings.Contains(message, "invalid input"),
 		strings.Contains(message, "pack name is required"),
+		strings.Contains(message, "pack items are required"),
 		strings.Contains(message, "pack search keyword is required"),
 		strings.Contains(message, "pack search keyword is too long"):
 		status = http.StatusBadRequest

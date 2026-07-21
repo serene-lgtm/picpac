@@ -15,9 +15,18 @@ type ListPacksInput struct {
 	HasQ   bool
 }
 
-// UpdatePackInput defines the service input for updating a pack.
-type UpdatePackInput struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Items       []string `json:"items"`
+// UpdatePackProfileInput defines the service input for updating a pack profile.
+type UpdatePackProfileInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// AddPackItemsInput defines the service input for adding pack items.
+type AddPackItemsInput struct {
+	Items []string `json:"items"`
+}
+
+// RemovePackItemsInput defines the service input for removing pack items.
+type RemovePackItemsInput struct {
+	Items []string `json:"items"`
 }

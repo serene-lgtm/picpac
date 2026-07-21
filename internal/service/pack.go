@@ -23,7 +23,9 @@ type PackService interface {
 	CreatePack(ctx context.Context, input request.CreatePackInput) (*domain.Pack, error)
 	ListPacks(ctx context.Context, input request.ListPacksInput) ([]domain.Pack, error)
 	GetPack(ctx context.Context, packID string, userID string) (*domain.Pack, error)
-	UpdatePack(ctx context.Context, packID string, userID string, input request.UpdatePackInput) (*domain.Pack, error)
+	UpdatePackProfile(ctx context.Context, packID string, userID string, input request.UpdatePackProfileInput) (*domain.Pack, error)
+	AddPackItems(ctx context.Context, packID string, userID string, input request.AddPackItemsInput) (*domain.Pack, error)
+	RemovePackItems(ctx context.Context, packID string, userID string, input request.RemovePackItemsInput) (*domain.Pack, error)
 	DeletePack(ctx context.Context, packID string, userID string) error
 }
 
@@ -130,8 +132,8 @@ func (s *packService) GetPack(ctx context.Context, packID string, userID string)
 	return pack, nil
 }
 
-// UpdatePack updates an existing pack.
-func (s *packService) UpdatePack(ctx context.Context, packID string, userID string, input request.UpdatePackInput) (*domain.Pack, error) {
+// UpdatePackProfile updates an existing pack profile.
+func (s *packService) UpdatePackProfile(ctx context.Context, packID string, userID string, input request.UpdatePackProfileInput) (*domain.Pack, error) {
 	pack, err := s.getOwnedPack(ctx, packID, userID)
 	if err != nil {
 		return nil, err
@@ -141,17 +143,61 @@ func (s *packService) UpdatePack(ctx context.Context, packID string, userID stri
 		return nil, fmt.Errorf("pack name is required")
 	}
 
-	items, err := parseOptionalObjectIDs(input.Items)
+	pack.Name = name
+	pack.Description = strings.TrimSpace(input.Description)
+	pack.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.Update(ctx, pack); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("pack not found")
+		}
+		return nil, fmt.Errorf("update pack failed: %w", err)
+	}
+
+	return pack, nil
+}
+
+// AddPackItems adds items to an existing pack.
+func (s *packService) AddPackItems(ctx context.Context, packID string, userID string, input request.AddPackItemsInput) (*domain.Pack, error) {
+	pack, err := s.getOwnedPack(ctx, packID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid input")
+		return nil, err
+	}
+
+	items, err := parseRequiredObjectIDs(input.Items)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.validateOwnedItems(ctx, pack.UserID, items); err != nil {
 		return nil, err
 	}
 
-	pack.Name = name
-	pack.Description = strings.TrimSpace(input.Description)
-	pack.Items = items
+	pack.Items = appendUniqueObjectIDs(pack.Items, items)
+	pack.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.Update(ctx, pack); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("pack not found")
+		}
+		return nil, fmt.Errorf("update pack failed: %w", err)
+	}
+
+	return pack, nil
+}
+
+// RemovePackItems removes items from an existing pack.
+func (s *packService) RemovePackItems(ctx context.Context, packID string, userID string, input request.RemovePackItemsInput) (*domain.Pack, error) {
+	pack, err := s.getOwnedPack(ctx, packID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	items, err := parseRequiredObjectIDs(input.Items)
+	if err != nil {
+		return nil, err
+	}
+
+	pack.Items = removeObjectIDs(pack.Items, items)
 	pack.UpdatedAt = time.Now().UTC()
 
 	if err := s.repo.Update(ctx, pack); err != nil {
@@ -240,4 +286,50 @@ func parseOptionalObjectIDs(values []string) ([]bson.ObjectID, error) {
 	}
 
 	return objectIDs, nil
+}
+
+func parseRequiredObjectIDs(values []string) ([]bson.ObjectID, error) {
+	if len(values) == 0 {
+		return nil, fmt.Errorf("pack items are required")
+	}
+
+	return parseOptionalObjectIDs(values)
+}
+
+func appendUniqueObjectIDs(existing []bson.ObjectID, additions []bson.ObjectID) []bson.ObjectID {
+	seen := make(map[bson.ObjectID]struct{}, len(existing)+len(additions))
+	result := make([]bson.ObjectID, 0, len(existing)+len(additions))
+	for _, itemID := range existing {
+		if _, ok := seen[itemID]; ok {
+			continue
+		}
+		seen[itemID] = struct{}{}
+		result = append(result, itemID)
+	}
+	for _, itemID := range additions {
+		if _, ok := seen[itemID]; ok {
+			continue
+		}
+		seen[itemID] = struct{}{}
+		result = append(result, itemID)
+	}
+
+	return result
+}
+
+func removeObjectIDs(existing []bson.ObjectID, removals []bson.ObjectID) []bson.ObjectID {
+	removeSet := make(map[bson.ObjectID]struct{}, len(removals))
+	for _, itemID := range removals {
+		removeSet[itemID] = struct{}{}
+	}
+
+	result := make([]bson.ObjectID, 0, len(existing))
+	for _, itemID := range existing {
+		if _, ok := removeSet[itemID]; ok {
+			continue
+		}
+		result = append(result, itemID)
+	}
+
+	return result
 }

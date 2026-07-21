@@ -29,7 +29,9 @@ type fakePackService struct {
 	gotUserID    string
 	updatePackID string
 	updateUserID string
-	updateInput  request.UpdatePackInput
+	profileInput request.UpdatePackProfileInput
+	addInput     request.AddPackItemsInput
+	removeInput  request.RemovePackItemsInput
 	deletePackID string
 	deleteUserID string
 }
@@ -62,10 +64,30 @@ func (s *fakePackService) GetPack(_ context.Context, packID string, userID strin
 	return s.defaultPack(), nil
 }
 
-func (s *fakePackService) UpdatePack(_ context.Context, packID string, userID string, input request.UpdatePackInput) (*domain.Pack, error) {
+func (s *fakePackService) UpdatePackProfile(_ context.Context, packID string, userID string, input request.UpdatePackProfileInput) (*domain.Pack, error) {
 	s.updatePackID = packID
 	s.updateUserID = userID
-	s.updateInput = input
+	s.profileInput = input
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.defaultPack(), nil
+}
+
+func (s *fakePackService) AddPackItems(_ context.Context, packID string, userID string, input request.AddPackItemsInput) (*domain.Pack, error) {
+	s.updatePackID = packID
+	s.updateUserID = userID
+	s.addInput = input
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.defaultPack(), nil
+}
+
+func (s *fakePackService) RemovePackItems(_ context.Context, packID string, userID string, input request.RemovePackItemsInput) (*domain.Pack, error) {
+	s.updatePackID = packID
+	s.updateUserID = userID
+	s.removeInput = input
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -110,7 +132,9 @@ func newAuthenticatedPackRouter(t *testing.T, packService *fakePackService) (*gi
 	packRoutes.POST("", packHandler.CreatePack)
 	packRoutes.GET("", packHandler.ListPacks)
 	packRoutes.GET("/:pack_id", packHandler.GetPack)
-	packRoutes.PUT("/:pack_id", packHandler.UpdatePack)
+	packRoutes.PATCH("/:pack_id/profile", packHandler.UpdatePackProfile)
+	packRoutes.POST("/:pack_id/items", packHandler.AddPackItems)
+	packRoutes.DELETE("/:pack_id/items", packHandler.RemovePackItems)
 	packRoutes.DELETE("/:pack_id", packHandler.DeletePack)
 
 	return router, token, userID.Hex()
@@ -238,19 +262,125 @@ func TestGetPackHandlerMapsNotFound(t *testing.T) {
 	}
 }
 
-func TestUpdatePackHandlerRequiresName(t *testing.T) {
+func TestUpdatePackProfileHandlerRequiresName(t *testing.T) {
 	t.Parallel()
 
 	recorder := httptest.NewRecorder()
 	router, token, _ := newAuthenticatedPackRouter(t, &fakePackService{})
 
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/pack/"+bson.NewObjectID().Hex(), bytes.NewBufferString(`{"description":"东京"}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/pack/"+bson.NewObjectID().Hex()+"/profile", bytes.NewBufferString(`{"description":"东京"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+}
+
+func TestUpdatePackProfileHandlerUsesCurrentUserID(t *testing.T) {
+	t.Parallel()
+
+	packService := &fakePackService{}
+	recorder := httptest.NewRecorder()
+	router, token, userID := newAuthenticatedPackRouter(t, packService)
+	packID := bson.NewObjectID().Hex()
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/pack/"+packID+"/profile", bytes.NewBufferString(`{"name":"日本出差","description":"东京"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if packService.updateUserID != userID || packService.updatePackID != packID {
+		t.Fatalf("unexpected update call: user=%s pack=%s", packService.updateUserID, packService.updatePackID)
+	}
+	if packService.profileInput.Name != "日本出差" || packService.profileInput.Description != "东京" {
+		t.Fatalf("unexpected profile input: %+v", packService.profileInput)
+	}
+}
+
+func TestAddPackItemsHandlerRequiresItems(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	router, token, _ := newAuthenticatedPackRouter(t, &fakePackService{})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/pack/"+bson.NewObjectID().Hex()+"/items", bytes.NewBufferString(`{"items":[]}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+}
+
+func TestAddPackItemsHandlerUsesCurrentUserID(t *testing.T) {
+	t.Parallel()
+
+	packService := &fakePackService{}
+	recorder := httptest.NewRecorder()
+	router, token, userID := newAuthenticatedPackRouter(t, packService)
+	packID := bson.NewObjectID().Hex()
+	itemID := bson.NewObjectID().Hex()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/pack/"+packID+"/items", bytes.NewBufferString(`{"items":["`+itemID+`"]}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if packService.updateUserID != userID || packService.updatePackID != packID {
+		t.Fatalf("unexpected add call: user=%s pack=%s", packService.updateUserID, packService.updatePackID)
+	}
+	if len(packService.addInput.Items) != 1 || packService.addInput.Items[0] != itemID {
+		t.Fatalf("unexpected add input: %+v", packService.addInput)
+	}
+}
+
+func TestRemovePackItemsHandlerRequiresItems(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	router, token, _ := newAuthenticatedPackRouter(t, &fakePackService{})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/pack/"+bson.NewObjectID().Hex()+"/items", bytes.NewBufferString(`{"items":[]}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+}
+
+func TestRemovePackItemsHandlerUsesCurrentUserID(t *testing.T) {
+	t.Parallel()
+
+	packService := &fakePackService{}
+	recorder := httptest.NewRecorder()
+	router, token, userID := newAuthenticatedPackRouter(t, packService)
+	packID := bson.NewObjectID().Hex()
+	itemID := bson.NewObjectID().Hex()
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/pack/"+packID+"/items", bytes.NewBufferString(`{"items":["`+itemID+`"]}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if packService.updateUserID != userID || packService.updatePackID != packID {
+		t.Fatalf("unexpected remove call: user=%s pack=%s", packService.updateUserID, packService.updatePackID)
+	}
+	if len(packService.removeInput.Items) != 1 || packService.removeInput.Items[0] != itemID {
+		t.Fatalf("unexpected remove input: %+v", packService.removeInput)
 	}
 }
 

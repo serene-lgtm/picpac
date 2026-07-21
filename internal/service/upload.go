@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
@@ -72,5 +73,18 @@ func (s *OSSUploadService) SignGetURL(ctx context.Context, objectKey string) (st
 		return "", err
 	}
 
-	return signedURL, nil
+	return normalizeSignedURLPath(signedURL)
+}
+
+func normalizeSignedURLPath(rawURL string) (string, error) {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+
+	parsedURL.Path = strings.ReplaceAll(parsedURL.EscapedPath(), "%2F", "/")
+	parsedURL.Path = strings.ReplaceAll(parsedURL.Path, "%2f", "/")
+	parsedURL.RawPath = ""
+
+	return parsedURL.String(), nil
 }
