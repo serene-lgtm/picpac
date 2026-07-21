@@ -66,7 +66,9 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 	packRoutes.POST("", packHandler.CreatePack)
 	packRoutes.GET("", packHandler.ListPacks)
 	packRoutes.GET("/:pack_id", packHandler.GetPack)
-	packRoutes.PUT("/:pack_id", packHandler.UpdatePack)
+	packRoutes.PATCH("/:pack_id/profile", packHandler.UpdatePackProfile)
+	packRoutes.POST("/:pack_id/items", packHandler.AddPackItems)
+	packRoutes.DELETE("/:pack_id/items", packHandler.RemovePackItems)
 	packRoutes.DELETE("/:pack_id", packHandler.DeletePack)
 
 	checklistRoutes := router.Group("/api/v1/checklist")

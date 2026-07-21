@@ -297,12 +297,12 @@ func TestGetPackRejectsForeignOwner(t *testing.T) {
 	}
 }
 
-func TestUpdatePackReplacesEditableFields(t *testing.T) {
+func TestUpdatePackProfileUpdatesEditableFieldsOnly(t *testing.T) {
 	t.Parallel()
 
 	packID := bson.NewObjectID()
 	userID := bson.NewObjectID()
-	itemID := bson.NewObjectID()
+	existingItemID := bson.NewObjectID()
 	originalUpdatedAt := time.Now().UTC().Add(-time.Hour)
 	repo := &fakePackRepository{
 		got: &domain.Pack{
@@ -310,36 +310,70 @@ func TestUpdatePackReplacesEditableFields(t *testing.T) {
 			UserID:      userID,
 			Name:        "旧行程",
 			Description: "old",
-			Items:       []bson.ObjectID{bson.NewObjectID()},
+			Items:       []bson.ObjectID{existingItemID},
 			Status:      domain.PackStatusCreated,
 			CreatedAt:   originalUpdatedAt,
 			UpdatedAt:   originalUpdatedAt,
 		},
 	}
-	items := &fakePackItemRepository{
-		items: map[bson.ObjectID]*domain.Item{
-			itemID: {ID: itemID, UserID: userID, Status: domain.ItemStatusCreated},
-		},
-	}
-	svc := NewPackService(repo, items)
+	svc := NewPackService(repo, &fakePackItemRepository{})
 
-	pack, err := svc.UpdatePack(context.Background(), packID.Hex(), userID.Hex(), request.UpdatePackInput{
+	pack, err := svc.UpdatePackProfile(context.Background(), packID.Hex(), userID.Hex(), request.UpdatePackProfileInput{
 		Name:        "日本出差",
 		Description: "东京 6 天商务行程",
-		Items:       []string{itemID.Hex()},
 	})
 	if err != nil {
-		t.Fatalf("UpdatePack returned error: %v", err)
+		t.Fatalf("UpdatePackProfile returned error: %v", err)
 	}
 	if repo.updated == nil || repo.updated.Name != "日本出差" {
 		t.Fatalf("expected repository update to be called")
+	}
+	if len(pack.Items) != 1 || pack.Items[0] != existingItemID {
+		t.Fatalf("expected existing items to be kept, got %+v", pack.Items)
 	}
 	if !pack.UpdatedAt.After(originalUpdatedAt) {
 		t.Fatalf("expected updated_at to advance, got %s", pack.UpdatedAt)
 	}
 }
 
-func TestUpdatePackRejectsForeignItem(t *testing.T) {
+func TestAddPackItemsAppendsAndDeduplicates(t *testing.T) {
+	t.Parallel()
+
+	packID := bson.NewObjectID()
+	userID := bson.NewObjectID()
+	existingItemID := bson.NewObjectID()
+	newItemID := bson.NewObjectID()
+	repo := &fakePackRepository{
+		got: &domain.Pack{
+			ID:     packID,
+			UserID: userID,
+			Items:  []bson.ObjectID{existingItemID},
+			Status: domain.PackStatusCreated,
+		},
+	}
+	items := &fakePackItemRepository{
+		items: map[bson.ObjectID]*domain.Item{
+			existingItemID: {ID: existingItemID, UserID: userID, Status: domain.ItemStatusCreated},
+			newItemID:      {ID: newItemID, UserID: userID, Status: domain.ItemStatusCreated},
+		},
+	}
+	svc := NewPackService(repo, items)
+
+	pack, err := svc.AddPackItems(context.Background(), packID.Hex(), userID.Hex(), request.AddPackItemsInput{
+		Items: []string{existingItemID.Hex(), newItemID.Hex(), newItemID.Hex()},
+	})
+	if err != nil {
+		t.Fatalf("AddPackItems returned error: %v", err)
+	}
+	if len(pack.Items) != 2 || pack.Items[0] != existingItemID || pack.Items[1] != newItemID {
+		t.Fatalf("unexpected items: %+v", pack.Items)
+	}
+	if repo.updated == nil {
+		t.Fatalf("expected repository update to be called")
+	}
+}
+
+func TestAddPackItemsRejectsForeignItem(t *testing.T) {
 	t.Parallel()
 
 	packID := bson.NewObjectID()
@@ -353,12 +387,73 @@ func TestUpdatePackRejectsForeignItem(t *testing.T) {
 		},
 	})
 
-	_, err := svc.UpdatePack(context.Background(), packID.Hex(), userID.Hex(), request.UpdatePackInput{
-		Name:  "日本出差",
+	_, err := svc.AddPackItems(context.Background(), packID.Hex(), userID.Hex(), request.AddPackItemsInput{
 		Items: []string{itemID.Hex()},
 	})
 	if err == nil || !strings.Contains(err.Error(), "pack item not found") {
 		t.Fatalf("expected pack item not found, got %v", err)
+	}
+}
+
+func TestAddPackItemsRejectsEmptyItems(t *testing.T) {
+	t.Parallel()
+
+	packID := bson.NewObjectID()
+	userID := bson.NewObjectID()
+	svc := NewPackService(&fakePackRepository{
+		got: &domain.Pack{ID: packID, UserID: userID, Status: domain.PackStatusCreated},
+	}, &fakePackItemRepository{})
+
+	_, err := svc.AddPackItems(context.Background(), packID.Hex(), userID.Hex(), request.AddPackItemsInput{})
+	if err == nil || !strings.Contains(err.Error(), "pack items are required") {
+		t.Fatalf("expected pack items are required, got %v", err)
+	}
+}
+
+func TestRemovePackItemsRemovesExistingAndIgnoresMissing(t *testing.T) {
+	t.Parallel()
+
+	packID := bson.NewObjectID()
+	userID := bson.NewObjectID()
+	keepItemID := bson.NewObjectID()
+	removeItemID := bson.NewObjectID()
+	missingItemID := bson.NewObjectID()
+	repo := &fakePackRepository{
+		got: &domain.Pack{
+			ID:     packID,
+			UserID: userID,
+			Items:  []bson.ObjectID{keepItemID, removeItemID},
+			Status: domain.PackStatusCreated,
+		},
+	}
+	svc := NewPackService(repo, &fakePackItemRepository{})
+
+	pack, err := svc.RemovePackItems(context.Background(), packID.Hex(), userID.Hex(), request.RemovePackItemsInput{
+		Items: []string{removeItemID.Hex(), missingItemID.Hex()},
+	})
+	if err != nil {
+		t.Fatalf("RemovePackItems returned error: %v", err)
+	}
+	if len(pack.Items) != 1 || pack.Items[0] != keepItemID {
+		t.Fatalf("unexpected items: %+v", pack.Items)
+	}
+	if repo.updated == nil {
+		t.Fatalf("expected repository update to be called")
+	}
+}
+
+func TestRemovePackItemsRejectsEmptyItems(t *testing.T) {
+	t.Parallel()
+
+	packID := bson.NewObjectID()
+	userID := bson.NewObjectID()
+	svc := NewPackService(&fakePackRepository{
+		got: &domain.Pack{ID: packID, UserID: userID, Status: domain.PackStatusCreated},
+	}, &fakePackItemRepository{})
+
+	_, err := svc.RemovePackItems(context.Background(), packID.Hex(), userID.Hex(), request.RemovePackItemsInput{})
+	if err == nil || !strings.Contains(err.Error(), "pack items are required") {
+		t.Fatalf("expected pack items are required, got %v", err)
 	}
 }
 

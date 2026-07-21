@@ -596,19 +596,17 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `404`: pack 不存在
 - `500`: 查询 pack 失败
 
-### Update Pack
+### Update Pack Profile
 
-`PUT /api/v1/pack/:pack_id`
+`PATCH /api/v1/pack/:pack_id/profile`
 
 用途：
-- 更新单个 pack 的完整可编辑字段
+- 更新单个 pack 的基本信息
 - 只允许更新当前登录用户自己的 pack
-- 前端提交更新后的 `name`、`description`、`items`
+- 只更新 `name`、`description`，不会修改 pack 内 item 列表
 - `name` 必填
 - `description` 传空字符串表示清空描述
-- `items` 传空数组表示清空 pack 内 item 列表
-- `items` 中的每个 item 都必须存在、未删除且属于当前登录用户
-- 后端会保留 `id`、`user_id`、`status`、`created_at` 等系统字段，并更新 `updated_at`
+- 后端会保留 `id`、`user_id`、`items`、`status`、`created_at` 等字段，并更新 `updated_at`
 - 如果 pack 已被逻辑删除，则不允许更新
 
 请求类型：
@@ -623,17 +621,13 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 请求字段：
 - `name`: string，必填
 - `description`: string，可选
-- `items`: string array，可选，表示更新后的完整 item id 列表
 
 请求示例：
 
 ```json
 {
   "name": "日本出差升级版",
-  "description": "东京 6 天商务行程",
-  "items": [
-    "6821c0c1f1b2f4d5a6b7c8d9"
-  ]
+  "description": "东京 6 天商务行程"
 }
 ```
 
@@ -653,9 +647,120 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```
 
 失败响应：
-- `400`: 缺少 `name`，`pack_id` 非法，或 `items` 中存在非法 item id
+- `400`: 缺少 `name`，或 `pack_id` 非法
+- `401`: access token 缺失、非法或过期
+- `404`: pack 不存在
+- `500`: 更新 pack 失败
+
+### Add Pack Items
+
+`POST /api/v1/pack/:pack_id/items`
+
+用途：
+- 批量添加 item 到 pack
+- 只允许更新当前登录用户自己的 pack
+- `items` 必填且不能为空
+- `items` 中的每个 item 都必须存在、未删除且属于当前登录用户
+- 已经在 pack 里的 item 会被忽略，后端会保证 pack 内 item id 不重复
+- 如果 pack 已被逻辑删除，则不允许更新
+
+请求类型：
+- `application/json`
+
+路径参数：
+- `pack_id`: string，必填，pack 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
+
+请求字段：
+- `items`: string array，必填，待添加的 item id 列表
+
+请求示例：
+
+```json
+{
+  "items": [
+    "6821c0c1f1b2f4d5a6b7c8d9",
+    "6821c0c1f1b2f4d5a6b7c8da"
+  ]
+}
+```
+
+成功响应：
+
+```json
+{
+  "id": "6821c0c1f1b2f4d5a6b7c8e0",
+  "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "name": "日本出差升级版",
+  "description": "东京 6 天商务行程",
+  "items": [
+    "6821c0c1f1b2f4d5a6b7c8d9",
+    "6821c0c1f1b2f4d5a6b7c8da"
+  ],
+  "status": "created"
+}
+```
+
+失败响应：
+- `400`: 缺少 `items`，`items` 为空，`pack_id` 非法，或 `items` 中存在非法 item id
 - `401`: access token 缺失、非法或过期
 - `404`: pack 不存在，或 `items` 中存在不属于当前用户、已删除或不存在的 item
+- `500`: 更新 pack 失败
+
+### Remove Pack Items
+
+`DELETE /api/v1/pack/:pack_id/items`
+
+用途：
+- 批量从 pack 删除 item
+- 只允许更新当前登录用户自己的 pack
+- `items` 必填且不能为空
+- 不在 pack 里的 item 会被忽略，重复调用结果一致
+- 如果 pack 已被逻辑删除，则不允许更新
+
+请求类型：
+- `application/json`
+
+路径参数：
+- `pack_id`: string，必填，pack 主键
+
+请求头：
+- `Authorization: Bearer <access_token>`
+
+请求字段：
+- `items`: string array，必填，待删除的 item id 列表
+
+请求示例：
+
+```json
+{
+  "items": [
+    "6821c0c1f1b2f4d5a6b7c8d9"
+  ]
+}
+```
+
+成功响应：
+
+```json
+{
+  "id": "6821c0c1f1b2f4d5a6b7c8e0",
+  "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "name": "日本出差升级版",
+  "description": "东京 6 天商务行程",
+  "items": [
+    "6821c0c1f1b2f4d5a6b7c8da"
+  ],
+  "status": "created"
+}
+```
+
+失败响应：
+- `400`: 缺少 `items`，`items` 为空，`pack_id` 非法，或 `items` 中存在非法 item id
+- `401`: access token 缺失、非法或过期
+- `404`: pack 不存在
 - `500`: 更新 pack 失败
 
 ### Delete Pack

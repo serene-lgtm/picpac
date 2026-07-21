@@ -51,7 +51,15 @@ func (s *fakePackService) GetPack(_ context.Context, _ string, _ string) (*domai
 	return &domain.Pack{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "pack"}, nil
 }
 
-func (s *fakePackService) UpdatePack(_ context.Context, _ string, _ string, _ request.UpdatePackInput) (*domain.Pack, error) {
+func (s *fakePackService) UpdatePackProfile(_ context.Context, _ string, _ string, _ request.UpdatePackProfileInput) (*domain.Pack, error) {
+	return &domain.Pack{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "pack"}, nil
+}
+
+func (s *fakePackService) AddPackItems(_ context.Context, _ string, _ string, _ request.AddPackItemsInput) (*domain.Pack, error) {
+	return &domain.Pack{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "pack"}, nil
+}
+
+func (s *fakePackService) RemovePackItems(_ context.Context, _ string, _ string, _ request.RemovePackItemsInput) (*domain.Pack, error) {
 	return &domain.Pack{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "pack"}, nil
 }
 
@@ -162,7 +170,9 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/pack"},
 		{method: http.MethodGet, path: "/api/v1/pack"},
 		{method: http.MethodGet, path: "/api/v1/pack/" + bson.NewObjectID().Hex()},
-		{method: http.MethodPut, path: "/api/v1/pack/" + bson.NewObjectID().Hex()},
+		{method: http.MethodPatch, path: "/api/v1/pack/" + bson.NewObjectID().Hex() + "/profile"},
+		{method: http.MethodPost, path: "/api/v1/pack/" + bson.NewObjectID().Hex() + "/items"},
+		{method: http.MethodDelete, path: "/api/v1/pack/" + bson.NewObjectID().Hex() + "/items"},
 		{method: http.MethodDelete, path: "/api/v1/pack/" + bson.NewObjectID().Hex()},
 		{method: http.MethodPost, path: "/api/v1/checklist"},
 		{method: http.MethodGet, path: "/api/v1/checklist"},
@@ -187,5 +197,20 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		if recorder.Code == http.StatusNotFound {
 			t.Fatalf("expected route %s %s to be registered", test.method, test.path)
 		}
+	}
+}
+
+func TestRegisterAPIRoutesDoesNotExposeLegacyPackUpdate(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/pack/"+bson.NewObjectID().Hex(), bytes.NewBuffer(nil))
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy pack update route to be unregistered, got %d", recorder.Code)
 	}
 }
