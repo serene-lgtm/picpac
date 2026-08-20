@@ -46,6 +46,7 @@ type AuthService interface {
 	Logout(ctx context.Context, input request.LogoutInput) error
 	Me(ctx context.Context, userID string) (*domain.User, error)
 	UpdateMyProfile(ctx context.Context, userID string, input request.UpdateMyProfileInput) (*domain.User, error)
+	DeleteMe(ctx context.Context, userID string) error
 }
 
 type authService struct {
@@ -289,6 +290,38 @@ func (s *authService) UpdateMyProfile(ctx context.Context, userID string, input 
 	}
 
 	return user, nil
+}
+
+// DeleteMe deletes the current user account logically.
+func (s *authService) DeleteMe(ctx context.Context, userID string) error {
+	objectID, err := parseObjectID(userID)
+	if err != nil {
+		return fmt.Errorf("invalid input")
+	}
+
+	user, err := s.getActiveUserByID(ctx, objectID)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	user.Status = domain.UserStatusDeleted
+	user.UpdatedAt = now
+
+	if err := s.users.Update(ctx, user); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return fmt.Errorf("user not found")
+		}
+		return fmt.Errorf("delete user failed: %w", err)
+	}
+	if err := s.identities.DisableByUserID(ctx, objectID, now); err != nil {
+		return fmt.Errorf("disable auth identities failed: %w", err)
+	}
+	if err := s.refreshTokens.RevokeByUserID(ctx, objectID, now); err != nil {
+		return fmt.Errorf("revoke refresh tokens failed: %w", err)
+	}
+
+	return nil
 }
 
 func (s *authService) getOrCreatePhoneUser(ctx context.Context, phone string) (*domain.User, error) {

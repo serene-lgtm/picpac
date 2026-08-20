@@ -22,8 +22,9 @@ import (
 )
 
 type fakeAuthService struct {
-	err  error
-	user *domain.User
+	err           error
+	user          *domain.User
+	deletedUserID string
 }
 
 type fakeObjectURLSigner struct {
@@ -84,6 +85,11 @@ func (s *fakeAuthService) UpdateMyProfile(_ context.Context, _ string, input req
 	user.Profile.AvatarObjectKey = "user-avatar/user_1.png"
 
 	return user, nil
+}
+
+func (s *fakeAuthService) DeleteMe(_ context.Context, userID string) error {
+	s.deletedUserID = userID
+	return s.err
 }
 
 func (s *fakeAuthService) defaultUser() *domain.User {
@@ -247,6 +253,38 @@ func TestMeHandlerReturnsCurrentUser(t *testing.T) {
 		t.Fatalf("expected 200, got %d", recorder.Code)
 	}
 	if !strings.Contains(recorder.Body.String(), userID.Hex()) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestDeleteMeHandlerReturnsDeleted(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	tokenService := service.NewTokenService("test-secret", time.Hour)
+	userID := bson.NewObjectID()
+	token, err := tokenService.CreateAccessToken(userID)
+	if err != nil {
+		t.Fatalf("CreateAccessToken returned error: %v", err)
+	}
+	authService := &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}}
+	authHandler := NewAuthHandler(authService, fakeObjectURLSigner{})
+	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
+	router.DELETE("/api/v1/auth/me", authMiddleware.RequireAuth(), authHandler.DeleteMe)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if authService.deletedUserID != userID.Hex() {
+		t.Fatalf("expected user %s to be deleted, got %s", userID.Hex(), authService.deletedUserID)
+	}
+	if !strings.Contains(recorder.Body.String(), `"deleted":true`) {
 		t.Fatalf("unexpected body: %s", recorder.Body.String())
 	}
 }

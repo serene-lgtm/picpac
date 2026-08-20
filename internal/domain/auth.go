@@ -10,7 +10,7 @@ type AuthIdentity struct {
 	ID         bson.ObjectID      `json:"id"`
 	UserID     bson.ObjectID      `json:"user_id"`
 	Provider   AuthProvider       `json:"provider"`
-	Identifier string             `json:"identifier"`
+	Identifier string             `json:"identifier"` // phone number or wechat id
 	Status     AuthIdentityStatus `json:"status"`
 	CreatedAt  time.Time          `json:"created_at"`
 	UpdatedAt  time.Time          `json:"updated_at"`

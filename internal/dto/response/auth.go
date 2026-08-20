@@ -36,3 +36,8 @@ type UserProfileResponse struct {
 type LogoutResponse struct {
 	LoggedOut bool `json:"logged_out"`
 }
+
+// DeleteMeResponse defines the API response for deleting the current account.
+type DeleteMeResponse struct {
+	Deleted bool `json:"deleted"`
+}

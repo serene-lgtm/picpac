@@ -127,6 +127,10 @@ func (s *fakeAuthService) UpdateMyProfile(_ context.Context, _ string, _ request
 	return &domain.User{ID: bson.NewObjectID(), Profile: domain.UserProfile{Username: "user", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}, nil
 }
 
+func (s *fakeAuthService) DeleteMe(_ context.Context, _ string) error {
+	return nil
+}
+
 type fakeTokenService struct{}
 
 func (s *fakeTokenService) CreateAccessToken(_ bson.ObjectID) (string, error) {
@@ -186,6 +190,7 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/auth/phone/login"},
 		{method: http.MethodPost, path: "/api/v1/auth/refresh"},
 		{method: http.MethodPost, path: "/api/v1/auth/logout"},
+		{method: http.MethodDelete, path: "/api/v1/auth/me"},
 		{method: http.MethodGet, path: "/api/v1/me"},
 		{method: http.MethodPut, path: "/api/v1/me/profile"},
 	}

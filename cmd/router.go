@@ -50,6 +50,7 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 	authRoutes.POST("/phone/login", authHandler.LoginWithPhone)
 	authRoutes.POST("/refresh", authHandler.Refresh)
 	authRoutes.POST("/logout", authHandler.Logout)
+	authRoutes.DELETE("/me", authMiddleware.RequireAuth(), authHandler.DeleteMe)
 	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
 	router.PUT("/api/v1/me/profile", authMiddleware.RequireAuth(), authHandler.UpdateMyProfile)
 
