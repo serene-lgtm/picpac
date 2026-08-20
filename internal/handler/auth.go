@@ -189,6 +189,22 @@ func (h *AuthHandler) UpdateMyProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, userResponse)
 }
 
+// DeleteMe handles current account deletion requests.
+func (h *AuthHandler) DeleteMe(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	if err := h.svc.DeleteMe(c.Request.Context(), userID); err != nil {
+		respondAuthError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response.DeleteMeResponse{Deleted: true})
+}
+
 func respondAuthError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	message := err.Error()

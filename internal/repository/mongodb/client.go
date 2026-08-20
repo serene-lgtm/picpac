@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"pack_mate/internal/config"
+	"pack_mate/internal/domain"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -59,13 +60,7 @@ func (c *Connection) Close(ctx context.Context) error {
 }
 
 func ensureIndexes(ctx context.Context, db *mongo.Database) error {
-	if _, err := db.Collection(authIdentityCollectionName).Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "prv", Value: 1},
-			{Key: "idf", Value: 1},
-		},
-		Options: options.Index().SetUnique(true),
-	}); err != nil {
+	if err := ensureAuthIdentityIndexes(ctx, db); err != nil {
 		return err
 	}
 
@@ -87,4 +82,65 @@ func ensureIndexes(ctx context.Context, db *mongo.Database) error {
 	}
 
 	return nil
+}
+
+func ensureAuthIdentityIndexes(ctx context.Context, db *mongo.Database) error {
+	collection := db.Collection(authIdentityCollectionName)
+	indexes := collection.Indexes()
+	const indexName = "auth_identity_active_provider_identifier_unique"
+
+	cursor, err := indexes.List(ctx)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close(ctx)
+
+	for cursor.Next(ctx) {
+		var index struct {
+			Name                    string `bson:"name"`
+			Key                     bson.D `bson:"key"`
+			Unique                  bool   `bson:"unique"`
+			PartialFilterExpression bson.M `bson:"partialFilterExpression"`
+		}
+		if err := cursor.Decode(&index); err != nil {
+			return err
+		}
+		if !isAuthIdentityProviderIdentifierIndex(index.Key) {
+			continue
+		}
+		if isActiveAuthIdentityUniqueIndex(index.Name, index.Unique, index.PartialFilterExpression) {
+			return nil
+		}
+		if err := indexes.DropOne(ctx, index.Name); err != nil {
+			return err
+		}
+	}
+	if err := cursor.Err(); err != nil {
+		return err
+	}
+
+	_, err = indexes.CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "prv", Value: 1},
+			{Key: "idf", Value: 1},
+		},
+		Options: options.Index().
+			SetName(indexName).
+			SetUnique(true).
+			SetPartialFilterExpression(bson.M{"st": domain.AuthIdentityStatusActive}),
+	})
+	return err
+}
+
+func isAuthIdentityProviderIdentifierIndex(key bson.D) bool {
+	return len(key) == 2 &&
+		key[0].Key == "prv" && fmt.Sprint(key[0].Value) == "1" &&
+		key[1].Key == "idf" && fmt.Sprint(key[1].Value) == "1"
+}
+
+func isActiveAuthIdentityUniqueIndex(name string, unique bool, partial bson.M) bool {
+	if name != "auth_identity_active_provider_identifier_unique" || !unique {
+		return false
+	}
+	return fmt.Sprint(partial["st"]) == string(domain.AuthIdentityStatusActive)
 }

@@ -18,10 +18,11 @@ import (
 )
 
 type fakeUserRepository struct {
-	created *domain.User
-	got     *domain.User
-	updated *domain.User
-	err     error
+	created   *domain.User
+	got       *domain.User
+	updated   *domain.User
+	err       error
+	updateErr error
 }
 
 func (r *fakeUserRepository) Create(_ context.Context, user *domain.User) error {
@@ -44,6 +45,9 @@ func (r *fakeUserRepository) GetByID(_ context.Context, _ bson.ObjectID) (*domai
 }
 
 func (r *fakeUserRepository) Update(_ context.Context, user *domain.User) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
 	if r.err != nil {
 		return r.err
 	}
@@ -53,9 +57,10 @@ func (r *fakeUserRepository) Update(_ context.Context, user *domain.User) error 
 }
 
 type fakeAuthIdentityRepository struct {
-	created *domain.AuthIdentity
-	got     *domain.AuthIdentity
-	err     error
+	created        *domain.AuthIdentity
+	got            *domain.AuthIdentity
+	disabledUserID bson.ObjectID
+	err            error
 }
 
 func (r *fakeAuthIdentityRepository) Create(_ context.Context, identity *domain.AuthIdentity) error {
@@ -75,6 +80,14 @@ func (r *fakeAuthIdentityRepository) GetByProviderAndIdentifier(_ context.Contex
 		return nil, mongo.ErrNoDocuments
 	}
 	return r.got, nil
+}
+
+func (r *fakeAuthIdentityRepository) DisableByUserID(_ context.Context, userID bson.ObjectID, _ time.Time) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.disabledUserID = userID
+	return nil
 }
 
 type fakePhoneCodeRepository struct {
@@ -129,10 +142,11 @@ func (r *fakePhoneCodeRepository) CountRecent(_ context.Context, _ string, _ tim
 }
 
 type fakeRefreshTokenRepository struct {
-	created *domain.RefreshToken
-	got     *domain.RefreshToken
-	revoked string
-	err     error
+	created       *domain.RefreshToken
+	got           *domain.RefreshToken
+	revoked       string
+	revokedUserID bson.ObjectID
+	err           error
 }
 
 func (r *fakeRefreshTokenRepository) Create(_ context.Context, token *domain.RefreshToken) error {
@@ -159,6 +173,14 @@ func (r *fakeRefreshTokenRepository) Revoke(_ context.Context, tokenHash string,
 		return r.err
 	}
 	r.revoked = tokenHash
+	return nil
+}
+
+func (r *fakeRefreshTokenRepository) RevokeByUserID(_ context.Context, userID bson.ObjectID, _ time.Time) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.revokedUserID = userID
 	return nil
 }
 
@@ -416,6 +438,104 @@ func TestLogoutRevokesRefreshToken(t *testing.T) {
 	}
 	if refreshTokens.revoked == "" {
 		t.Fatalf("expected refresh token to be revoked")
+	}
+}
+
+func TestDeleteMeDeletesUserAndRevokesAuthState(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{
+		ID: userID,
+		Profile: domain.UserProfile{
+			Username:        "用户8000",
+			AvatarObjectKey: defaultUserAvatarObjectKey,
+		},
+		Status: domain.UserStatusCreated,
+	}}
+	identities := &fakeAuthIdentityRepository{}
+	refreshTokens := &fakeRefreshTokenRepository{}
+	svc := newTestAuthService(users, identities, &fakePhoneCodeRepository{}, refreshTokens, &recordingSMSService{})
+
+	if err := svc.DeleteMe(context.Background(), userID.Hex()); err != nil {
+		t.Fatalf("DeleteMe returned error: %v", err)
+	}
+	if users.updated == nil || users.updated.Status != domain.UserStatusDeleted {
+		t.Fatalf("expected user to be marked deleted, got %+v", users.updated)
+	}
+	if identities.disabledUserID != userID {
+		t.Fatalf("expected identities to be disabled for %s, got %s", userID.Hex(), identities.disabledUserID.Hex())
+	}
+	if refreshTokens.revokedUserID != userID {
+		t.Fatalf("expected refresh tokens to be revoked for %s, got %s", userID.Hex(), refreshTokens.revokedUserID.Hex())
+	}
+}
+
+func TestDeleteMeRejectsInvalidUserID(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestAuthService(&fakeUserRepository{}, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
+
+	err := svc.DeleteMe(context.Background(), "invalid")
+	if err == nil || !strings.Contains(err.Error(), "invalid input") {
+		t.Fatalf("expected invalid input error, got %v", err)
+	}
+}
+
+func TestDeleteMeReturnsUserNotFoundForDeletedUser(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Status: domain.UserStatusDeleted}}
+	svc := newTestAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
+
+	err := svc.DeleteMe(context.Background(), userID.Hex())
+	if err == nil || !strings.Contains(err.Error(), "user not found") {
+		t.Fatalf("expected user not found error, got %v", err)
+	}
+}
+
+func TestDeleteMeReturnsDeleteUserFailure(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{
+		got:       &domain.User{ID: userID, Status: domain.UserStatusCreated},
+		updateErr: errors.New("write failed"),
+	}
+	svc := newTestAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
+
+	err := svc.DeleteMe(context.Background(), userID.Hex())
+	if err == nil || !strings.Contains(err.Error(), "delete user failed") {
+		t.Fatalf("expected delete user failure, got %v", err)
+	}
+}
+
+func TestDeleteMeReturnsDisableIdentityFailure(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Status: domain.UserStatusCreated}}
+	identities := &fakeAuthIdentityRepository{err: errors.New("write failed")}
+	svc := newTestAuthService(users, identities, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, &recordingSMSService{})
+
+	err := svc.DeleteMe(context.Background(), userID.Hex())
+	if err == nil || !strings.Contains(err.Error(), "disable auth identities failed") {
+		t.Fatalf("expected disable auth identities failure, got %v", err)
+	}
+}
+
+func TestDeleteMeReturnsRevokeRefreshTokenFailure(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Status: domain.UserStatusCreated}}
+	refreshTokens := &fakeRefreshTokenRepository{err: errors.New("write failed")}
+	svc := newTestAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, refreshTokens, &recordingSMSService{})
+
+	err := svc.DeleteMe(context.Background(), userID.Hex())
+	if err == nil || !strings.Contains(err.Error(), "revoke refresh tokens failed") {
+		t.Fatalf("expected revoke refresh tokens failure, got %v", err)
 	}
 }
 

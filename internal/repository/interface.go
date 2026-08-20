@@ -57,6 +57,7 @@ type UserRepository interface {
 type AuthIdentityRepository interface {
 	Create(ctx context.Context, identity *domain.AuthIdentity) error
 	GetByProviderAndIdentifier(ctx context.Context, provider domain.AuthProvider, identifier string) (*domain.AuthIdentity, error)
+	DisableByUserID(ctx context.Context, userID bson.ObjectID, disabledAt time.Time) error
 }
 
 // PhoneVerificationCodeRepository defines persistence behavior for phone verification codes.
@@ -73,4 +74,5 @@ type RefreshTokenRepository interface {
 	Create(ctx context.Context, token *domain.RefreshToken) error
 	GetByTokenHash(ctx context.Context, tokenHash string) (*domain.RefreshToken, error)
 	Revoke(ctx context.Context, tokenHash string, revokedAt time.Time) error
+	RevokeByUserID(ctx context.Context, userID bson.ObjectID, revokedAt time.Time) error
 }

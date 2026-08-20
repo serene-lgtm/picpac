@@ -53,6 +53,20 @@ func (r *AuthIdentityRepository) GetByProviderAndIdentifier(ctx context.Context,
 	return &identity, nil
 }
 
+// DisableByUserID disables all active auth identities for a user.
+func (r *AuthIdentityRepository) DisableByUserID(ctx context.Context, userID bson.ObjectID, disabledAt time.Time) error {
+	_, err := r.collection.UpdateMany(ctx, bson.M{
+		"uid": userID,
+		"st":  domain.AuthIdentityStatusActive,
+	}, bson.M{
+		"$set": bson.M{
+			"st":  domain.AuthIdentityStatusDisabled,
+			"uat": disabledAt,
+		},
+	})
+	return err
+}
+
 func newAuthIdentityDocument(identity *domain.AuthIdentity) authIdentityDocument {
 	return authIdentityDocument{
 		ID:         identity.ID,

@@ -164,6 +164,38 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `401`: refresh token 非法
 - `500`: revoke refresh token 失败
 
+### Delete Account
+
+`DELETE /api/v1/auth/me`
+
+用途：
+- 注销当前登录用户账户
+- 注销是逻辑删除，不会物理删除 MongoDB 文档
+- 注销后当前用户状态会变为 `deleted`
+- 注销后该用户所有登录身份会变为 `disabled`
+- 注销后该用户所有未失效的 refresh token 会被 revoke
+- access token 当前不落库；注销后旧 access token 因用户状态已是 `deleted`，无法继续访问受保护接口
+- 同一手机号允许重新注册；后端只对 active 的 `AuthIdentity(provider, identifier)` 保持唯一约束
+
+请求头：
+- `Authorization: Bearer <access_token>`
+
+请求体：
+- 无
+
+成功响应：
+
+```json
+{
+  "deleted": true
+}
+```
+
+失败响应：
+- `401`: 缺少 access token，access token 非法或已过期
+- `404`: User 不存在
+- `500`: 删除 User、禁用 AuthIdentity 或 revoke refresh token 失败
+
 ### Me
 
 `GET /api/v1/me`

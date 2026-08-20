@@ -67,6 +67,20 @@ func (r *RefreshTokenRepository) Revoke(ctx context.Context, tokenHash string, r
 	return nil
 }
 
+// RevokeByUserID revokes all active refresh tokens for a user.
+func (r *RefreshTokenRepository) RevokeByUserID(ctx context.Context, userID bson.ObjectID, revokedAt time.Time) error {
+	_, err := r.collection.UpdateMany(ctx, bson.M{
+		"uid": userID,
+		"rev": bson.M{"$exists": false},
+	}, bson.M{
+		"$set": bson.M{
+			"rev": revokedAt,
+			"uat": revokedAt,
+		},
+	})
+	return err
+}
+
 func newRefreshTokenDocument(token *domain.RefreshToken) refreshTokenDocument {
 	return refreshTokenDocument{
 		ID:        token.ID,
