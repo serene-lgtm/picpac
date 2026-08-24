@@ -17,6 +17,17 @@ type Configuration struct {
 	Auth      AuthConfig      `json:"auth"`
 }
 
+// CategorySeedFile defines system category seeds loaded from category.json.
+type CategorySeedFile struct {
+	Categories []CategorySeedConfig `json:"categories"`
+}
+
+// CategorySeedConfig defines a system category seed.
+type CategorySeedConfig struct {
+	Key  string `json:"key"`
+	Name string `json:"name"`
+}
+
 // ServerConfig defines HTTP server settings.
 type ServerConfig struct {
 	Port string `json:"port"`
@@ -88,6 +99,24 @@ func Load(path string) (*Configuration, error) {
 	return &cfg, nil
 }
 
+// LoadCategorySeeds reads and validates category seed configuration from a JSON file.
+func LoadCategorySeeds(path string) (*CategorySeedFile, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read category seed file: %w", err)
+	}
+
+	var seeds CategorySeedFile
+	if err := json.Unmarshal(body, &seeds); err != nil {
+		return nil, fmt.Errorf("decode category seed file: %w", err)
+	}
+	if err := validateCategorySeeds(&seeds); err != nil {
+		return nil, err
+	}
+
+	return &seeds, nil
+}
+
 func validate(cfg *Configuration) error {
 	switch {
 	case strings.TrimSpace(cfg.Server.Port) == "":
@@ -141,6 +170,37 @@ func validate(cfg *Configuration) error {
 	}
 	if cfg.Auth.PhoneCode.UseDevFixedCode && strings.TrimSpace(cfg.Auth.PhoneCode.DevFixedCode) == "" {
 		return fmt.Errorf("invalid config: auth.phone_code.dev_fixed_code is required when use_dev_fixed_code is true")
+	}
+
+	return nil
+}
+
+func validateCategorySeeds(seeds *CategorySeedFile) error {
+	if len(seeds.Categories) == 0 {
+		return fmt.Errorf("invalid category seed: categories are required")
+	}
+
+	seen := make(map[string]struct{}, len(seeds.Categories))
+	hasOther := false
+	for _, category := range seeds.Categories {
+		key := strings.TrimSpace(category.Key)
+		name := strings.TrimSpace(category.Name)
+		if key == "" {
+			return fmt.Errorf("invalid category seed: category key is required")
+		}
+		if name == "" {
+			return fmt.Errorf("invalid category seed: category name is required")
+		}
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("invalid category seed: duplicate category key %s", key)
+		}
+		seen[key] = struct{}{}
+		if key == "other" {
+			hasOther = true
+		}
+	}
+	if !hasOther {
+		return fmt.Errorf("invalid category seed: other category is required")
 	}
 
 	return nil

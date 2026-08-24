@@ -33,15 +33,17 @@ type ItemService interface {
 }
 
 type itemService struct {
-	repo     repository.ItemRepository
-	uploader UploadService
+	repo       repository.ItemRepository
+	uploader   UploadService
+	categories CategoryService
 }
 
 // NewItemService creates an item service.
-func NewItemService(repo repository.ItemRepository, uploader UploadService) ItemService {
+func NewItemService(repo repository.ItemRepository, uploader UploadService, categories CategoryService) ItemService {
 	return &itemService{
-		repo:     repo,
-		uploader: uploader,
+		repo:       repo,
+		uploader:   uploader,
+		categories: categories,
 	}
 }
 
@@ -56,11 +58,16 @@ func (s *itemService) CreateItem(ctx context.Context, input request.CreateItemIn
 	if err != nil {
 		return nil, fmt.Errorf("invalid input")
 	}
+	categoryID, err := s.resolveCategoryID(ctx, input.CategoryID)
+	if err != nil {
+		return nil, err
+	}
 
 	now := time.Now().UTC()
 	item := &domain.Item{
 		ID:                       bson.NewObjectID(),
 		UserID:                   userID,
+		CategoryID:               categoryID,
 		Name:                     name,
 		Description:              strings.TrimSpace(input.Description),
 		SourceImageObjectKey:     "",
@@ -88,46 +95,38 @@ func (s *itemService) CreateItem(ctx context.Context, input request.CreateItemIn
 
 // ListItems lists all items or searches items by keyword.
 func (s *itemService) ListItems(ctx context.Context, input request.ListItemsInput) ([]domain.Item, error) {
-	var (
-		items []domain.Item
-		err   error
-	)
-	if input.HasQ {
-		items, err = s.searchItemsByKeyword(ctx, input.UserID, input.Q)
-	} else {
-		items, err = s.listItems(ctx, input.UserID)
+	userID, err := parseObjectID(input.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
 	}
+
+	filter := repository.ItemFilter{UserID: userID}
+	if input.HasQ {
+		keyword := strings.TrimSpace(input.Q)
+		if keyword == "" {
+			return nil, fmt.Errorf("item search keyword is required")
+		}
+		if utf8.RuneCountInString(keyword) > maxItemSearchKeywordRunes {
+			return nil, fmt.Errorf("item search keyword is too long")
+		}
+		filter.Keyword = keyword
+		filter.HasKeyword = true
+	}
+	if input.HasCategoryID {
+		category, err := s.getCategory(ctx, input.CategoryID)
+		if err != nil {
+			return nil, err
+		}
+		filter.CategoryID = category.ID
+		filter.HasCategoryID = true
+	}
+
+	items, err := s.repo.ListByFilter(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("list items failed: %w", err)
 	}
 
 	return items, nil
-}
-
-func (s *itemService) listItems(ctx context.Context, userID string) ([]domain.Item, error) {
-	objectID, err := parseObjectID(userID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid input")
-	}
-
-	return s.repo.ListByUserID(ctx, objectID)
-}
-
-func (s *itemService) searchItemsByKeyword(ctx context.Context, userID string, keyword string) ([]domain.Item, error) {
-	keyword = strings.TrimSpace(keyword)
-	if keyword == "" {
-		return nil, fmt.Errorf("item search keyword is required")
-	}
-	if utf8.RuneCountInString(keyword) > maxItemSearchKeywordRunes {
-		return nil, fmt.Errorf("item search keyword is too long")
-	}
-
-	objectID, err := parseObjectID(userID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid input")
-	}
-
-	return s.repo.SearchByKeywordAndUserID(ctx, objectID, keyword)
 }
 
 // GetItem gets a single item by ID.
@@ -154,6 +153,13 @@ func (s *itemService) UpdateItem(ctx context.Context, itemID string, userID stri
 
 	item.Name = name
 	item.Description = strings.TrimSpace(input.Description)
+	if input.HasCategoryID {
+		categoryID, err := s.resolveCategoryID(ctx, input.CategoryID)
+		if err != nil {
+			return nil, err
+		}
+		item.CategoryID = categoryID
+	}
 	item.UpdatedAt = time.Now().UTC()
 
 	if input.File != nil {
@@ -192,6 +198,24 @@ func (s *itemService) DeleteItem(ctx context.Context, itemID string, userID stri
 	}
 
 	return nil
+}
+
+func (s *itemService) resolveCategoryID(ctx context.Context, categoryID string) (bson.ObjectID, error) {
+	if s.categories == nil {
+		return bson.NilObjectID, nil
+	}
+	return s.categories.ResolveCategoryID(ctx, categoryID)
+}
+
+func (s *itemService) getCategory(ctx context.Context, categoryID string) (*domain.Category, error) {
+	if s.categories == nil {
+		objectID, err := parseObjectID(categoryID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid category")
+		}
+		return &domain.Category{ID: objectID}, nil
+	}
+	return s.categories.GetCategory(ctx, categoryID)
 }
 
 func (s *itemService) getOwnedItem(ctx context.Context, itemID string, userID string) (*domain.Item, error) {

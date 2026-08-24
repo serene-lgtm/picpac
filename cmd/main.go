@@ -32,6 +32,13 @@ func main() {
 	defer func() {
 		_ = mongoConn.Close(context.Background())
 	}()
+	categorySeeds, err := loadCategorySeeds()
+	if err != nil {
+		panic(err)
+	}
+	if err := mongodb.SeedCategories(context.Background(), mongoConn.Database, categorySeeds.Categories); err != nil {
+		panic(err)
+	}
 
 	port := strings.TrimSpace(appCfg.Server.Port)
 	if port == "" {
@@ -80,6 +87,43 @@ func loadConfig() (*config.Configuration, error) {
 	}
 
 	return nil, fmt.Errorf("load config.json: %w", lastErr)
+}
+
+func loadCategorySeeds() (*config.CategorySeedFile, error) {
+	candidates := []string{}
+	if path := strings.TrimSpace(os.Getenv("PICPAC_CATEGORY_CONFIG")); path != "" {
+		candidates = append(candidates, path)
+	}
+	candidates = append(candidates, "category.json", filepath.Join("..", "category.json"))
+
+	if executablePath, err := os.Executable(); err == nil {
+		executableDir := filepath.Dir(executablePath)
+		candidates = append(candidates,
+			filepath.Join(executableDir, "category.json"),
+			filepath.Join(executableDir, "..", "category.json"),
+		)
+	}
+
+	var lastErr error
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		cleanPath := filepath.Clean(candidate)
+		if _, ok := seen[cleanPath]; ok {
+			continue
+		}
+		seen[cleanPath] = struct{}{}
+
+		seeds, err := config.LoadCategorySeeds(cleanPath)
+		if err == nil {
+			return seeds, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		lastErr = err
+	}
+
+	return nil, fmt.Errorf("load category.json: %w", lastErr)
 }
 
 func newOSSBucket(cfg *config.Configuration) (*oss.Bucket, error) {

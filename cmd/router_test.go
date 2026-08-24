@@ -37,6 +37,24 @@ func (s *fakeItemService) DeleteItem(_ context.Context, _ string, _ string) erro
 	return nil
 }
 
+type fakeCategoryService struct{}
+
+func (s *fakeCategoryService) ListCategories(_ context.Context) ([]domain.Category, error) {
+	return []domain.Category{{ID: bson.NewObjectID(), Key: "other", Name: "其他"}}, nil
+}
+
+func (s *fakeCategoryService) GetCategory(_ context.Context, _ string) (*domain.Category, error) {
+	return &domain.Category{ID: bson.NewObjectID(), Key: "other", Name: "其他"}, nil
+}
+
+func (s *fakeCategoryService) GetCategoryByID(_ context.Context, _ bson.ObjectID) (*domain.Category, error) {
+	return &domain.Category{ID: bson.NewObjectID(), Key: "other", Name: "其他"}, nil
+}
+
+func (s *fakeCategoryService) ResolveCategoryID(_ context.Context, _ string) (bson.ObjectID, error) {
+	return bson.NewObjectID(), nil
+}
+
 type fakePackService struct{}
 
 func (s *fakePackService) CreatePack(_ context.Context, _ request.CreatePackInput) (*domain.Pack, error) {
@@ -160,7 +178,7 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
+	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeCategoryService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
 
 	tests := []struct {
 		method string
@@ -171,6 +189,7 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/item/" + bson.NewObjectID().Hex()},
 		{method: http.MethodPut, path: "/api/v1/item/" + bson.NewObjectID().Hex()},
 		{method: http.MethodDelete, path: "/api/v1/item/" + bson.NewObjectID().Hex()},
+		{method: http.MethodGet, path: "/api/v1/categories"},
 		{method: http.MethodPost, path: "/api/v1/pack"},
 		{method: http.MethodGet, path: "/api/v1/pack"},
 		{method: http.MethodGet, path: "/api/v1/pack/" + bson.NewObjectID().Hex()},
@@ -210,7 +229,7 @@ func TestRegisterAPIRoutesDoesNotExposeLegacyPackUpdate(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
+	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeCategoryService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/pack/"+bson.NewObjectID().Hex(), bytes.NewBuffer(nil))
 	recorder := httptest.NewRecorder()

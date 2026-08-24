@@ -35,6 +35,46 @@ type fakeItemService struct {
 	deleteUserID string
 }
 
+type fakeCategoryService struct {
+	category *domain.Category
+	err      error
+}
+
+func (s *fakeCategoryService) ListCategories(_ context.Context) ([]domain.Category, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return []domain.Category{*s.defaultCategory()}, nil
+}
+
+func (s *fakeCategoryService) GetCategory(_ context.Context, _ string) (*domain.Category, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.defaultCategory(), nil
+}
+
+func (s *fakeCategoryService) GetCategoryByID(_ context.Context, _ bson.ObjectID) (*domain.Category, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.defaultCategory(), nil
+}
+
+func (s *fakeCategoryService) ResolveCategoryID(_ context.Context, _ string) (bson.ObjectID, error) {
+	if s.err != nil {
+		return bson.NilObjectID, s.err
+	}
+	return s.defaultCategory().ID, nil
+}
+
+func (s *fakeCategoryService) defaultCategory() *domain.Category {
+	if s.category != nil {
+		return s.category
+	}
+	return &domain.Category{ID: bson.NewObjectID(), Key: "other", Name: "其他"}
+}
+
 func (s *fakeItemService) CreateItem(_ context.Context, input request.CreateItemInput) (*domain.Item, error) {
 	s.createInput = input
 	if s.err != nil {
@@ -96,7 +136,7 @@ func newAuthenticatedItemRouter(t *testing.T, itemService *fakeItemService) (*gi
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	itemHandler := NewItemHandler(itemService, fakeObjectURLSigner{})
+	itemHandler := NewItemHandler(itemService, &fakeCategoryService{}, fakeObjectURLSigner{})
 	tokenService := service.NewTokenService("test-secret", time.Hour)
 	userID := bson.NewObjectID()
 	token, err := tokenService.CreateAccessToken(userID)
@@ -160,6 +200,33 @@ func TestCreateItemHandlerUsesCurrentUserID(t *testing.T) {
 	}
 	if itemService.createInput.UserID != userID {
 		t.Fatalf("expected current user id %s, got %s", userID, itemService.createInput.UserID)
+	}
+}
+
+func TestCreateItemHandlerPassesCategoryID(t *testing.T) {
+	t.Parallel()
+
+	itemService := &fakeItemService{}
+	recorder := httptest.NewRecorder()
+	router, token, _ := newAuthenticatedItemRouter(t, itemService)
+	categoryID := bson.NewObjectID().Hex()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("name", "黑色双肩包")
+	_ = writer.WriteField("category_id", categoryID)
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/item", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if itemService.createInput.CategoryID != categoryID {
+		t.Fatalf("expected category id %s, got %s", categoryID, itemService.createInput.CategoryID)
 	}
 }
 
@@ -253,6 +320,41 @@ func TestListItemsHandlerSearchesByQ(t *testing.T) {
 	}
 }
 
+func TestListItemsHandlerFiltersByCategoryID(t *testing.T) {
+	t.Parallel()
+
+	categoryID := bson.NewObjectID().Hex()
+	itemService := &fakeItemService{}
+	recorder := httptest.NewRecorder()
+	router, token, _ := newAuthenticatedItemRouter(t, itemService)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/item?category_id="+categoryID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if !itemService.listInput.HasCategoryID || itemService.listInput.CategoryID != categoryID {
+		t.Fatalf("expected category filter %s, got %+v", categoryID, itemService.listInput)
+	}
+}
+
+func TestListItemsHandlerRejectsEmptyCategoryID(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	router, token, _ := newAuthenticatedItemRouter(t, &fakeItemService{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/item?category_id=", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+}
+
 func TestListItemsHandlerRejectsEmptyQ(t *testing.T) {
 	t.Parallel()
 
@@ -306,6 +408,63 @@ func TestUpdateItemHandlerRequiresName(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), "name is required") {
 		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestUpdateItemHandlerPassesCategoryID(t *testing.T) {
+	t.Parallel()
+
+	itemService := &fakeItemService{}
+	recorder := httptest.NewRecorder()
+	router, token, userID := newAuthenticatedItemRouter(t, itemService)
+	itemID := bson.NewObjectID().Hex()
+	categoryID := bson.NewObjectID().Hex()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("name", "黑色双肩包")
+	_ = writer.WriteField("category_id", categoryID)
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/item/"+itemID, body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if itemService.updateUserID != userID || itemService.updateItemID != itemID {
+		t.Fatalf("unexpected update call: user=%s item=%s", itemService.updateUserID, itemService.updateItemID)
+	}
+	if !itemService.updateInput.HasCategoryID || itemService.updateInput.CategoryID != categoryID {
+		t.Fatalf("expected category id %s, got %+v", categoryID, itemService.updateInput)
+	}
+}
+
+func TestUpdateItemHandlerKeepsCategoryWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	itemService := &fakeItemService{}
+	recorder := httptest.NewRecorder()
+	router, token, _ := newAuthenticatedItemRouter(t, itemService)
+	itemID := bson.NewObjectID().Hex()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("name", "黑色双肩包")
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/item/"+itemID, body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if itemService.updateInput.HasCategoryID || itemService.updateInput.CategoryID != "" {
+		t.Fatalf("expected category to be omitted, got %+v", itemService.updateInput)
 	}
 }
 

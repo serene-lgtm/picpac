@@ -60,6 +60,13 @@ func (c *Connection) Close(ctx context.Context) error {
 }
 
 func ensureIndexes(ctx context.Context, db *mongo.Database) error {
+	if _, err := db.Collection(categoryCollectionName).Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "key", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		return err
+	}
+
 	if err := ensureAuthIdentityIndexes(ctx, db); err != nil {
 		return err
 	}

@@ -22,28 +22,33 @@ func newRouter(cfg *config.Configuration, bucket *oss.Bucket, db *mongo.Database
 	itemRepo := mongodb.NewItemRepository(db)
 	packRepo := mongodb.NewPackRepository(db)
 	checklistRepo := mongodb.NewChecklistRepository(db)
+	categoryRepo := mongodb.NewCategoryRepository(db)
 	userRepo := mongodb.NewUserRepository(db)
 	authIdentityRepo := mongodb.NewAuthIdentityRepository(db)
 	phoneCodeRepo := mongodb.NewPhoneVerificationCodeRepository(db)
 	refreshTokenRepo := mongodb.NewRefreshTokenRepository(db)
 	uploadService := service.NewOSSUploadService(bucket, cfg.OSS.SignedURLTTLSeconds)
 	tokenService := service.NewTokenService(cfg.Auth.AccessTokenSecret, time.Duration(cfg.Auth.AccessTokenTTLSeconds)*time.Second)
-	itemService := service.NewItemService(itemRepo, uploadService)
+	categoryService := service.NewCategoryService(categoryRepo)
+	itemService := service.NewItemService(itemRepo, uploadService, categoryService)
 	packService := service.NewPackService(packRepo, itemRepo)
 	checklistService := service.NewChecklistService(checklistRepo, itemRepo)
 	authService := service.NewAuthService(userRepo, authIdentityRepo, phoneCodeRepo, refreshTokenRepo, uploadService, service.NewFakeSMSService(), tokenService, cfg.Auth)
 
-	registerAPIRoutes(router, itemService, packService, checklistService, authService, tokenService, uploadService)
+	registerAPIRoutes(router, itemService, packService, checklistService, categoryService, authService, tokenService, uploadService)
 
 	return router
 }
 
-func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService, checklistService service.ChecklistService, authService service.AuthService, tokenService service.TokenService, objectURLSigner service.ObjectURLSigner) {
-	itemHandler := handler.NewItemHandler(itemService, objectURLSigner)
+func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService, checklistService service.ChecklistService, categoryService service.CategoryService, authService service.AuthService, tokenService service.TokenService, objectURLSigner service.ObjectURLSigner) {
+	itemHandler := handler.NewItemHandler(itemService, categoryService, objectURLSigner)
 	packHandler := handler.NewPackHandler(packService)
 	checklistHandler := handler.NewChecklistHandler(checklistService)
+	categoryHandler := handler.NewCategoryHandler(categoryService)
 	authHandler := handler.NewAuthHandler(authService, objectURLSigner)
 	authMiddleware := handler.NewAuthMiddleware(tokenService, authService)
+
+	router.GET("/api/v1/categories", categoryHandler.ListCategories)
 
 	authRoutes := router.Group("/api/v1/auth")
 	authRoutes.POST("/phone/code", authHandler.SendPhoneCode)

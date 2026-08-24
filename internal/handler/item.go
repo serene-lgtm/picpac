@@ -16,13 +16,14 @@ import (
 
 // ItemHandler handles item HTTP requests.
 type ItemHandler struct {
-	svc       service.ItemService
-	urlSigner service.ObjectURLSigner
+	svc        service.ItemService
+	categories service.CategoryService
+	urlSigner  service.ObjectURLSigner
 }
 
 // NewItemHandler creates an item handler.
-func NewItemHandler(svc service.ItemService, urlSigner service.ObjectURLSigner) *ItemHandler {
-	return &ItemHandler{svc: svc, urlSigner: urlSigner}
+func NewItemHandler(svc service.ItemService, categories service.CategoryService, urlSigner service.ObjectURLSigner) *ItemHandler {
+	return &ItemHandler{svc: svc, categories: categories, urlSigner: urlSigner}
 }
 
 // CreateItem handles item creation requests.
@@ -42,6 +43,7 @@ func (h *ItemHandler) CreateItem(c *gin.Context) {
 
 	input := request.CreateItemInput{
 		UserID:      userID,
+		CategoryID:  strings.TrimSpace(c.PostForm("category_id")),
 		Name:        name,
 		Description: description,
 	}
@@ -80,11 +82,19 @@ func (h *ItemHandler) ListItems(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "q is required"})
 		return
 	}
+	categoryID, hasCategoryID := c.GetQuery("category_id")
+	categoryID = strings.TrimSpace(categoryID)
+	if hasCategoryID && categoryID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "category_id is required"})
+		return
+	}
 
 	items, err := h.svc.ListItems(c.Request.Context(), request.ListItemsInput{
-		UserID: userID,
-		Q:      q,
-		HasQ:   hasQ,
+		UserID:        userID,
+		Q:             q,
+		HasQ:          hasQ,
+		CategoryID:    categoryID,
+		HasCategoryID: hasCategoryID,
 	})
 	if err != nil {
 		respondItemError(c, err)
@@ -154,9 +164,12 @@ func (h *ItemHandler) UpdateItem(c *gin.Context) {
 		return
 	}
 
+	categoryID, hasCategoryID := c.GetPostForm("category_id")
 	input := request.UpdateItemInput{
-		Name:        name,
-		Description: description,
+		CategoryID:    strings.TrimSpace(categoryID),
+		HasCategoryID: hasCategoryID,
+		Name:          name,
+		Description:   description,
 	}
 	if file, header, err := c.Request.FormFile("image"); err == nil {
 		defer file.Close()
@@ -206,6 +219,8 @@ func respondItemError(c *gin.Context, err error) {
 	message := err.Error()
 	switch {
 	case strings.Contains(message, "invalid input"),
+		strings.Contains(message, "invalid category"),
+		strings.Contains(message, "category_id is required"),
 		strings.Contains(message, "item name is required"),
 		strings.Contains(message, "item search keyword is required"),
 		strings.Contains(message, "item search keyword is too long"):
@@ -215,6 +230,10 @@ func respondItemError(c *gin.Context, err error) {
 	case strings.Contains(message, "upload item image failed"):
 		status = http.StatusBadGateway
 	case strings.Contains(message, "sign item image url failed"):
+		status = http.StatusInternalServerError
+	case strings.Contains(message, "default category not found"),
+		strings.Contains(message, "get default category failed"),
+		strings.Contains(message, "get category failed"):
 		status = http.StatusInternalServerError
 	case strings.Contains(message, "create item failed"),
 		strings.Contains(message, "list items failed"),
@@ -239,8 +258,12 @@ func (h *ItemHandler) buildItemResponse(ctx context.Context, item *domain.Item) 
 	if err != nil {
 		return response.ItemResponse{}, err
 	}
+	category, err := h.categoryForItem(ctx, item)
+	if err != nil {
+		return response.ItemResponse{}, err
+	}
 
-	return response.ItemResponse{
+	itemResponse := response.ItemResponse{
 		ID:                 item.ID.Hex(),
 		UserID:             item.UserID.Hex(),
 		Name:               item.Name,
@@ -249,7 +272,21 @@ func (h *ItemHandler) buildItemResponse(ctx context.Context, item *domain.Item) 
 		ImageThumbnailURL:  imageThumbnailURL,
 		AIRenderedImageURL: aiRenderedImageURL,
 		Status:             string(item.Status),
-	}, nil
+	}
+	if category != nil {
+		itemResponse.CategoryID = category.ID.Hex()
+		itemResponse.CategoryKey = category.Key
+		itemResponse.CategoryName = category.Name
+	}
+
+	return itemResponse, nil
+}
+
+func (h *ItemHandler) categoryForItem(ctx context.Context, item *domain.Item) (*domain.Category, error) {
+	if h.categories == nil {
+		return nil, nil
+	}
+	return h.categories.GetCategoryByID(ctx, item.CategoryID)
 }
 
 func (h *ItemHandler) signObjectURL(ctx context.Context, objectKey string, label string) (string, error) {

@@ -5,6 +5,7 @@ import "io"
 // CreateItemInput defines the service input for creating an item.
 type CreateItemInput struct {
 	UserID      string
+	CategoryID  string
 	Name        string
 	Description string
 	File        io.ReadSeeker
@@ -13,15 +14,19 @@ type CreateItemInput struct {
 
 // ListItemsInput defines the service input for listing items.
 type ListItemsInput struct {
-	UserID string
-	Q      string
-	HasQ   bool
+	UserID        string
+	Q             string
+	HasQ          bool
+	CategoryID    string
+	HasCategoryID bool
 }
 
 // UpdateItemInput defines the service input for updating an item.
 type UpdateItemInput struct {
-	Name        string
-	Description string
-	File        io.ReadSeeker
-	FileName    string
+	CategoryID    string
+	HasCategoryID bool
+	Name          string
+	Description   string
+	File          io.ReadSeeker
+	FileName      string
 }
