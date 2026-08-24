@@ -1,0 +1,48 @@
+{
+  "categories": [
+    {
+      "key": "document",
+      "name": "证件"
+    },
+    {
+      "key": "electronics",
+      "name": "电子设备"
+    },
+    {
+      "key": "clothing",
+      "name": "衣物"
+    },
+    {
+      "key": "toiletries",
+      "name": "洗漱用品"
+    },
+    {
+      "key": "medicine",
+      "name": "药品"
+    },
+    {
+      "key": "food",
+      "name": "食品"
+    },
+    {
+      "key": "cash_card",
+      "name": "现金与卡"
+    },
+    {
+      "key": "cosmetics",
+      "name": "护肤美妆"
+    },
+    {
+      "key": "daily_use",
+      "name": "日用品"
+    },
+    {
+      "key": "outdoor",
+      "name": "户外用品"
+    },
+    {
+      "key": "other",
+      "name": "其他"
+    }
+  ]
+}

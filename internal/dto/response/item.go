@@ -4,6 +4,9 @@ package response
 type ItemResponse struct {
 	ID                 string `json:"id"`
 	UserID             string `json:"user_id"`
+	CategoryID         string `json:"category_id"`
+	CategoryKey        string `json:"category_key"`
+	CategoryName       string `json:"category_name"`
 	Name               string `json:"name"`
 	Description        string `json:"description"`
 	SourceImageURL     string `json:"source_image_url"`

@@ -9,16 +9,34 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+// CategoryRepository defines persistence behavior for system categories.
+type CategoryRepository interface {
+	ListAll(ctx context.Context) ([]domain.Category, error)
+	GetByID(ctx context.Context, categoryID bson.ObjectID) (*domain.Category, error)
+	GetByKey(ctx context.Context, key string) (*domain.Category, error)
+	UpsertByKey(ctx context.Context, category *domain.Category) error
+}
+
 // ItemRepository defines persistence behavior for items.
 type ItemRepository interface {
 	Create(ctx context.Context, item *domain.Item) error
 	ListAll(ctx context.Context) ([]domain.Item, error)
 	ListByUserID(ctx context.Context, userID bson.ObjectID) ([]domain.Item, error)
+	ListByFilter(ctx context.Context, filter ItemFilter) ([]domain.Item, error)
 	SearchByKeyword(ctx context.Context, keyword string) ([]domain.Item, error)
 	SearchByKeywordAndUserID(ctx context.Context, userID bson.ObjectID, keyword string) ([]domain.Item, error)
 	GetByID(ctx context.Context, itemID bson.ObjectID) (*domain.Item, error)
 	Update(ctx context.Context, item *domain.Item) error
 	DeleteByID(ctx context.Context, itemID bson.ObjectID) error
+}
+
+// ItemFilter defines item list filters.
+type ItemFilter struct {
+	UserID        bson.ObjectID
+	Keyword       string
+	HasKeyword    bool
+	CategoryID    bson.ObjectID
+	HasCategoryID bool
 }
 
 // PackRepository defines persistence behavior for packs.

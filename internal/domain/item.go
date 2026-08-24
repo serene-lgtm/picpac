@@ -9,6 +9,7 @@ import (
 type Item struct {
 	ID                       bson.ObjectID `json:"id"`
 	UserID                   bson.ObjectID `json:"user_id"`
+	CategoryID               bson.ObjectID `json:"category_id"`
 	Name                     string        `json:"name"`
 	Description              string        `json:"description"`
 	SourceImageObjectKey     string        `json:"source_image_object_key"`

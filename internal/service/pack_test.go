@@ -9,6 +9,7 @@ import (
 
 	"pack_mate/internal/domain"
 	"pack_mate/internal/dto/request"
+	"pack_mate/internal/repository"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -120,6 +121,9 @@ func (r *fakePackItemRepository) ListAll(_ context.Context) ([]domain.Item, erro
 	return nil, nil
 }
 func (r *fakePackItemRepository) ListByUserID(_ context.Context, _ bson.ObjectID) ([]domain.Item, error) {
+	return nil, nil
+}
+func (r *fakePackItemRepository) ListByFilter(_ context.Context, _ repository.ItemFilter) ([]domain.Item, error) {
 	return nil, nil
 }
 func (r *fakePackItemRepository) SearchByKeyword(_ context.Context, _ string) ([]domain.Item, error) {

@@ -11,6 +11,7 @@ import (
 
 	"pack_mate/internal/domain"
 	"pack_mate/internal/dto/request"
+	"pack_mate/internal/repository"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -21,6 +22,7 @@ type fakeItemRepository struct {
 	listed        []domain.Item
 	searched      []domain.Item
 	listUserID    bson.ObjectID
+	filter        repository.ItemFilter
 	searchUserID  bson.ObjectID
 	searchKeyword string
 	gotItemID     bson.ObjectID
@@ -52,6 +54,14 @@ func (r *fakeItemRepository) ListByUserID(_ context.Context, userID bson.ObjectI
 		return nil, r.err
 	}
 	r.listUserID = userID
+	return r.listed, nil
+}
+
+func (r *fakeItemRepository) ListByFilter(_ context.Context, filter repository.ItemFilter) ([]domain.Item, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	r.filter = filter
 	return r.listed, nil
 }
 
@@ -110,6 +120,39 @@ type fakeUploadService struct {
 	err       error
 }
 
+type fakeItemCategoryService struct {
+	categoryID bson.ObjectID
+	err        error
+}
+
+func (s *fakeItemCategoryService) ListCategories(_ context.Context) ([]domain.Category, error) {
+	return nil, nil
+}
+
+func (s *fakeItemCategoryService) GetCategory(_ context.Context, _ string) (*domain.Category, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.categoryID == bson.NilObjectID {
+		s.categoryID = bson.NewObjectID()
+	}
+	return &domain.Category{ID: s.categoryID, Key: "other", Name: "其他"}, nil
+}
+
+func (s *fakeItemCategoryService) GetCategoryByID(_ context.Context, _ bson.ObjectID) (*domain.Category, error) {
+	return nil, nil
+}
+
+func (s *fakeItemCategoryService) ResolveCategoryID(_ context.Context, _ string) (bson.ObjectID, error) {
+	if s.err != nil {
+		return bson.NilObjectID, s.err
+	}
+	if s.categoryID == bson.NilObjectID {
+		s.categoryID = bson.NewObjectID()
+	}
+	return s.categoryID, nil
+}
+
 func (s *fakeUploadService) Upload(_ context.Context, objectKey string, _ string, _ io.Reader) error {
 	if s.err != nil {
 		return s.err
@@ -136,8 +179,9 @@ func TestCreateItemStoresItemWithoutImage(t *testing.T) {
 	t.Parallel()
 
 	userID := bson.NewObjectID()
+	categoryID := bson.NewObjectID()
 	repo := &fakeItemRepository{}
-	svc := NewItemService(repo, &fakeUploadService{})
+	svc := NewItemService(repo, &fakeUploadService{}, &fakeItemCategoryService{categoryID: categoryID})
 
 	item, err := svc.CreateItem(context.Background(), request.CreateItemInput{
 		UserID:      userID.Hex(),
@@ -153,11 +197,29 @@ func TestCreateItemStoresItemWithoutImage(t *testing.T) {
 	if item.UserID != userID {
 		t.Fatalf("expected user id %s, got %s", userID.Hex(), item.UserID.Hex())
 	}
+	if item.CategoryID != categoryID {
+		t.Fatalf("expected category id %s, got %s", categoryID.Hex(), item.CategoryID.Hex())
+	}
 	if item.Name != "黑色双肩包" || item.SourceImageObjectKey != "" {
 		t.Fatalf("unexpected item: %+v", item)
 	}
 	if item.Status != domain.ItemStatusCreated {
 		t.Fatalf("expected status=created, got %s", item.Status)
+	}
+}
+
+func TestCreateItemRejectsInvalidCategory(t *testing.T) {
+	t.Parallel()
+
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{}, &fakeItemCategoryService{err: errors.New("invalid category")})
+
+	_, err := svc.CreateItem(context.Background(), request.CreateItemInput{
+		UserID:     bson.NewObjectID().Hex(),
+		CategoryID: bson.NewObjectID().Hex(),
+		Name:       "黑色双肩包",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid category") {
+		t.Fatalf("expected invalid category error, got %v", err)
 	}
 }
 
@@ -167,7 +229,7 @@ func TestCreateItemUploadsImageWhenProvided(t *testing.T) {
 	userID := bson.NewObjectID()
 	repo := &fakeItemRepository{}
 	uploader := &fakeUploadService{}
-	svc := NewItemService(repo, uploader)
+	svc := NewItemService(repo, uploader, nil)
 
 	item, err := svc.CreateItem(context.Background(), request.CreateItemInput{
 		UserID:   userID.Hex(),
@@ -189,7 +251,7 @@ func TestCreateItemUploadsImageWhenProvided(t *testing.T) {
 func TestCreateItemRejectsMissingName(t *testing.T) {
 	t.Parallel()
 
-	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{})
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{}, nil)
 
 	_, err := svc.CreateItem(context.Background(), request.CreateItemInput{
 		UserID: bson.NewObjectID().Hex(),
@@ -202,7 +264,7 @@ func TestCreateItemRejectsMissingName(t *testing.T) {
 func TestCreateItemRejectsMissingUserID(t *testing.T) {
 	t.Parallel()
 
-	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{})
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{}, nil)
 
 	_, err := svc.CreateItem(context.Background(), request.CreateItemInput{
 		Name: "黑色双肩包",
@@ -218,7 +280,7 @@ func TestListItemsReturnsCurrentUserResults(t *testing.T) {
 	userID := bson.NewObjectID()
 	expected := []domain.Item{{UserID: userID, Name: "黑色双肩包"}}
 	repo := &fakeItemRepository{listed: expected}
-	svc := NewItemService(repo, &fakeUploadService{})
+	svc := NewItemService(repo, &fakeUploadService{}, nil)
 
 	items, err := svc.ListItems(context.Background(), request.ListItemsInput{UserID: userID.Hex()})
 	if err != nil {
@@ -227,15 +289,39 @@ func TestListItemsReturnsCurrentUserResults(t *testing.T) {
 	if len(items) != 1 || items[0].Name != "黑色双肩包" {
 		t.Fatalf("unexpected items: %+v", items)
 	}
-	if repo.listUserID != userID {
-		t.Fatalf("expected list by user id %s, got %s", userID.Hex(), repo.listUserID.Hex())
+	if repo.filter.UserID != userID {
+		t.Fatalf("expected list by user id %s, got %s", userID.Hex(), repo.filter.UserID.Hex())
+	}
+}
+
+func TestListItemsFiltersByCategory(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	categoryID := bson.NewObjectID()
+	repo := &fakeItemRepository{listed: []domain.Item{{Name: "护照", CategoryID: categoryID}}}
+	svc := NewItemService(repo, &fakeUploadService{}, &fakeItemCategoryService{categoryID: categoryID})
+
+	items, err := svc.ListItems(context.Background(), request.ListItemsInput{
+		UserID:        userID.Hex(),
+		CategoryID:    categoryID.Hex(),
+		HasCategoryID: true,
+	})
+	if err != nil {
+		t.Fatalf("ListItems returned error: %v", err)
+	}
+	if len(items) != 1 || items[0].CategoryID != categoryID {
+		t.Fatalf("unexpected items: %+v", items)
+	}
+	if !repo.filter.HasCategoryID || repo.filter.CategoryID != categoryID {
+		t.Fatalf("expected category filter %s, got %+v", categoryID.Hex(), repo.filter)
 	}
 }
 
 func TestListItemsRejectsMissingUserID(t *testing.T) {
 	t.Parallel()
 
-	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{})
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{}, nil)
 
 	_, err := svc.ListItems(context.Background(), request.ListItemsInput{})
 	if err == nil || !strings.Contains(err.Error(), "invalid input") {
@@ -248,8 +334,8 @@ func TestListItemsSearchesByChineseKeyword(t *testing.T) {
 
 	userID := bson.NewObjectID()
 	expected := []domain.Item{{Name: "手机充电器"}}
-	repo := &fakeItemRepository{searched: expected}
-	svc := NewItemService(repo, &fakeUploadService{})
+	repo := &fakeItemRepository{listed: expected}
+	svc := NewItemService(repo, &fakeUploadService{}, nil)
 
 	items, err := svc.ListItems(context.Background(), request.ListItemsInput{
 		UserID: userID.Hex(),
@@ -262,19 +348,45 @@ func TestListItemsSearchesByChineseKeyword(t *testing.T) {
 	if len(items) != 1 || items[0].Name != "手机充电器" {
 		t.Fatalf("unexpected items: %+v", items)
 	}
-	if repo.searchKeyword != "充电" {
-		t.Fatalf("expected trimmed keyword, got %q", repo.searchKeyword)
+	if repo.filter.Keyword != "充电" {
+		t.Fatalf("expected trimmed keyword, got %q", repo.filter.Keyword)
 	}
-	if repo.searchUserID != userID {
-		t.Fatalf("expected search by user id %s, got %s", userID.Hex(), repo.searchUserID.Hex())
+	if repo.filter.UserID != userID {
+		t.Fatalf("expected search by user id %s, got %s", userID.Hex(), repo.filter.UserID.Hex())
+	}
+}
+
+func TestListItemsFiltersByKeywordAndCategory(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	categoryID := bson.NewObjectID()
+	repo := &fakeItemRepository{listed: []domain.Item{{Name: "手机充电器", CategoryID: categoryID}}}
+	svc := NewItemService(repo, &fakeUploadService{}, &fakeItemCategoryService{categoryID: categoryID})
+
+	_, err := svc.ListItems(context.Background(), request.ListItemsInput{
+		UserID:        userID.Hex(),
+		Q:             "充电",
+		HasQ:          true,
+		CategoryID:    categoryID.Hex(),
+		HasCategoryID: true,
+	})
+	if err != nil {
+		t.Fatalf("ListItems returned error: %v", err)
+	}
+	if !repo.filter.HasKeyword || repo.filter.Keyword != "充电" {
+		t.Fatalf("expected keyword filter, got %+v", repo.filter)
+	}
+	if !repo.filter.HasCategoryID || repo.filter.CategoryID != categoryID {
+		t.Fatalf("expected category filter %s, got %+v", categoryID.Hex(), repo.filter)
 	}
 }
 
 func TestListItemsSearchesByDescriptionKeyword(t *testing.T) {
 	t.Parallel()
 
-	repo := &fakeItemRepository{searched: []domain.Item{{Name: "转换插头", Description: "支持手机充电器"}}}
-	svc := NewItemService(repo, &fakeUploadService{})
+	repo := &fakeItemRepository{listed: []domain.Item{{Name: "转换插头", Description: "支持手机充电器"}}}
+	svc := NewItemService(repo, &fakeUploadService{}, nil)
 
 	items, err := svc.ListItems(context.Background(), request.ListItemsInput{
 		UserID: bson.NewObjectID().Hex(),
@@ -292,7 +404,7 @@ func TestListItemsSearchesByDescriptionKeyword(t *testing.T) {
 func TestListItemsRejectsEmptySearchKeyword(t *testing.T) {
 	t.Parallel()
 
-	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{})
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{}, nil)
 
 	_, err := svc.ListItems(context.Background(), request.ListItemsInput{
 		UserID: bson.NewObjectID().Hex(),
@@ -306,7 +418,7 @@ func TestListItemsRejectsEmptySearchKeyword(t *testing.T) {
 func TestListItemsRejectsTooLongSearchKeyword(t *testing.T) {
 	t.Parallel()
 
-	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{})
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{}, nil)
 	keyword := strings.Repeat("行", maxItemSearchKeywordRunes+1)
 
 	_, err := svc.ListItems(context.Background(), request.ListItemsInput{
@@ -322,7 +434,7 @@ func TestListItemsRejectsTooLongSearchKeyword(t *testing.T) {
 func TestListItemsRejectsInvalidUserID(t *testing.T) {
 	t.Parallel()
 
-	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{})
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{}, nil)
 
 	_, err := svc.ListItems(context.Background(), request.ListItemsInput{UserID: "bad-user-id"})
 	if err == nil || !strings.Contains(err.Error(), "invalid input") {
@@ -333,7 +445,7 @@ func TestListItemsRejectsInvalidUserID(t *testing.T) {
 func TestListItemsWrapsSearchRepositoryError(t *testing.T) {
 	t.Parallel()
 
-	svc := NewItemService(&fakeItemRepository{err: errors.New("db down")}, &fakeUploadService{})
+	svc := NewItemService(&fakeItemRepository{err: errors.New("db down")}, &fakeUploadService{}, nil)
 
 	_, err := svc.ListItems(context.Background(), request.ListItemsInput{
 		UserID: bson.NewObjectID().Hex(),
@@ -348,7 +460,7 @@ func TestListItemsWrapsSearchRepositoryError(t *testing.T) {
 func TestGetItemMapsNotFound(t *testing.T) {
 	t.Parallel()
 
-	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{})
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{}, nil)
 
 	_, err := svc.GetItem(context.Background(), bson.NewObjectID().Hex(), bson.NewObjectID().Hex())
 	if err == nil || !strings.Contains(err.Error(), "item not found") {
@@ -366,7 +478,7 @@ func TestGetItemRejectsForeignOwner(t *testing.T) {
 			UserID: bson.NewObjectID(),
 			Status: domain.ItemStatusCreated,
 		},
-	}, &fakeUploadService{})
+	}, &fakeUploadService{}, nil)
 
 	_, err := svc.GetItem(context.Background(), itemID.Hex(), bson.NewObjectID().Hex())
 	if err == nil || !strings.Contains(err.Error(), "item not found") {
@@ -385,7 +497,7 @@ func TestGetItemHidesDeletedItem(t *testing.T) {
 			UserID: userID,
 			Status: domain.ItemStatusDeleted,
 		},
-	}, &fakeUploadService{})
+	}, &fakeUploadService{}, nil)
 
 	_, err := svc.GetItem(context.Background(), itemID.Hex(), userID.Hex())
 	if err == nil || !strings.Contains(err.Error(), "item not found") {
@@ -398,6 +510,7 @@ func TestUpdateItemReplacesFieldsAndOptionalImage(t *testing.T) {
 
 	itemID := bson.NewObjectID()
 	userID := bson.NewObjectID()
+	categoryID := bson.NewObjectID()
 	repo := &fakeItemRepository{
 		got: &domain.Item{
 			ID:                   itemID,
@@ -410,12 +523,14 @@ func TestUpdateItemReplacesFieldsAndOptionalImage(t *testing.T) {
 		},
 	}
 	uploader := &fakeUploadService{}
-	svc := NewItemService(repo, uploader)
+	svc := NewItemService(repo, uploader, &fakeItemCategoryService{categoryID: categoryID})
 
 	item, err := svc.UpdateItem(context.Background(), itemID.Hex(), userID.Hex(), request.UpdateItemInput{
-		Name:     "新名称",
-		File:     bytes.NewReader(testPNGBytes()),
-		FileName: "bag.png",
+		CategoryID:    categoryID.Hex(),
+		HasCategoryID: true,
+		Name:          "新名称",
+		File:          bytes.NewReader(testPNGBytes()),
+		FileName:      "bag.png",
 	})
 	if err != nil {
 		t.Fatalf("UpdateItem returned error: %v", err)
@@ -423,8 +538,39 @@ func TestUpdateItemReplacesFieldsAndOptionalImage(t *testing.T) {
 	if repo.updated == nil || repo.updated.Name != "新名称" {
 		t.Fatalf("expected repository update to be called")
 	}
+	if repo.updated.CategoryID != categoryID {
+		t.Fatalf("expected category id %s, got %s", categoryID.Hex(), repo.updated.CategoryID.Hex())
+	}
 	if item.SourceImageObjectKey != uploader.objectKey {
 		t.Fatalf("expected image object key %s, got %s", uploader.objectKey, item.SourceImageObjectKey)
+	}
+}
+
+func TestUpdateItemKeepsCategoryWhenNotProvided(t *testing.T) {
+	t.Parallel()
+
+	itemID := bson.NewObjectID()
+	userID := bson.NewObjectID()
+	categoryID := bson.NewObjectID()
+	repo := &fakeItemRepository{
+		got: &domain.Item{
+			ID:         itemID,
+			UserID:     userID,
+			CategoryID: categoryID,
+			Name:       "旧名称",
+			Status:     domain.ItemStatusCreated,
+		},
+	}
+	svc := NewItemService(repo, &fakeUploadService{}, &fakeItemCategoryService{categoryID: bson.NewObjectID()})
+
+	_, err := svc.UpdateItem(context.Background(), itemID.Hex(), userID.Hex(), request.UpdateItemInput{
+		Name: "新名称",
+	})
+	if err != nil {
+		t.Fatalf("UpdateItem returned error: %v", err)
+	}
+	if repo.updated.CategoryID != categoryID {
+		t.Fatalf("expected category id to remain %s, got %s", categoryID.Hex(), repo.updated.CategoryID.Hex())
 	}
 }
 
@@ -438,7 +584,7 @@ func TestUpdateItemRejectsForeignOwner(t *testing.T) {
 			UserID: bson.NewObjectID(),
 			Status: domain.ItemStatusCreated,
 		},
-	}, &fakeUploadService{})
+	}, &fakeUploadService{}, nil)
 
 	_, err := svc.UpdateItem(context.Background(), itemID.Hex(), bson.NewObjectID().Hex(), request.UpdateItemInput{
 		Name: "新名称",
@@ -460,7 +606,7 @@ func TestDeleteItemWrapsRepositoryError(t *testing.T) {
 			Status: domain.ItemStatusCreated,
 		},
 		deleteErr: errors.New("db down"),
-	}, &fakeUploadService{})
+	}, &fakeUploadService{}, nil)
 
 	err := svc.DeleteItem(context.Background(), itemID.Hex(), userID.Hex())
 	if err == nil || !strings.Contains(err.Error(), "delete item failed") {
@@ -480,7 +626,7 @@ func TestDeleteItemMarksStatusDeleted(t *testing.T) {
 			Status: domain.ItemStatusCreated,
 		},
 	}
-	svc := NewItemService(repo, &fakeUploadService{})
+	svc := NewItemService(repo, &fakeUploadService{}, nil)
 
 	err := svc.DeleteItem(context.Background(), itemID.Hex(), userID.Hex())
 	if err != nil {
@@ -501,7 +647,7 @@ func TestDeleteItemRejectsForeignOwner(t *testing.T) {
 			UserID: bson.NewObjectID(),
 			Status: domain.ItemStatusCreated,
 		},
-	}, &fakeUploadService{})
+	}, &fakeUploadService{}, nil)
 
 	err := svc.DeleteItem(context.Background(), itemID.Hex(), bson.NewObjectID().Hex())
 	if err == nil || !strings.Contains(err.Error(), "item not found") {

@@ -276,6 +276,37 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `502`: 上传头像到 OSS 失败
 - `500`: 更新用户资料或生成头像访问 URL 失败
 
+### List Categories
+
+`GET /api/v1/categories`
+
+用途：
+- 获取系统预设 item category 列表
+- category 从根目录 `category.json` 初始化到 MongoDB
+- 当前版本只有系统分类，不支持用户自定义分类
+
+成功响应：
+
+```json
+{
+  "categories": [
+    {
+      "id": "6821c0c1f1b2f4d5a6b7c8a1",
+      "key": "document",
+      "name": "证件"
+    },
+    {
+      "id": "6821c0c1f1b2f4d5a6b7c8a2",
+      "key": "electronics",
+      "name": "电子设备"
+    }
+  ]
+}
+```
+
+失败响应：
+- `500`: 查询 category 列表失败
+
 ### Create Item
 
 `POST /api/v1/item`
@@ -293,6 +324,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 请求字段：
 - `name`: string，必填
 - `description`: string，可选
+- `category_id`: string，可选；不传或传空字符串时后端使用 `key=other` 的 category
 - `image`: 文件，可选
 
 成功响应：
@@ -301,6 +333,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 {
   "id": "6821c0c1f1b2f4d5a6b7c8d9",
   "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "category_id": "6821c0c1f1b2f4d5a6b7c8a1",
+  "category_key": "document",
+  "category_name": "证件",
   "name": "黑色双肩包",
   "description": "日常出差用",
   "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
@@ -311,10 +346,10 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```
 
 失败响应：
-- `400`: 缺少 `name`，或上传文件不是有效图片
+- `400`: 缺少 `name`，`category_id` 非法/不存在，或上传文件不是有效图片
 - `401`: access token 缺失、非法或过期
 - `502`: 图片上传失败
-- `500`: 创建 item 或生成图片访问 URL 失败
+- `500`: 创建 item、查询默认 category 或生成图片访问 URL 失败
 
 ### List Items
 
@@ -323,22 +358,33 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 用途：
 - 查询当前用户的全部 item
 - 可通过 `q` 按 item name 或 description 做关键词子串匹配，主要用于中文 item 搜索
+- 可通过 `category_id` 按 item category 过滤；可与 `q` 同时使用
 - 默认按创建时间倒序返回
 - 已逻辑删除的 item 不会出现在列表中
 
 请求参数：
 - 需要 `Authorization: Bearer <access_token>`
 - `q`: string，可选，按 item name 或 description 子串匹配；当前最大长度为 50 个字符，传空字符串会返回 `400`
+- `category_id`: string，可选，按 category 过滤；传空字符串或非法/不存在的 category id 会返回 `400`
 
 搜索示例：
 
 `GET /api/v1/item?q=充电`
+
+分类过滤示例：
+
+`GET /api/v1/item?category_id=6821c0c1f1b2f4d5a6b7c8a2`
+
+组合过滤示例：
+
+`GET /api/v1/item?q=充电&category_id=6821c0c1f1b2f4d5a6b7c8a2`
 
 说明：
 - `q=充电` 可以匹配 `手机充电器`、`充电宝` 等名称，也可以匹配 description 中包含 `充电` 的 item
 - 中文关键词不做分词，按原始子串匹配
 - 英文关键词大小写不敏感
 - `q` 搜索 `name` 和 `description`
+- `category_id` 过滤当前用户该 category 下的 item
 
 成功响应：
 
@@ -348,6 +394,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
     {
       "id": "6821c0c1f1b2f4d5a6b7c8d9",
       "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+      "category_id": "6821c0c1f1b2f4d5a6b7c8a2",
+      "category_key": "electronics",
+      "category_name": "电子设备",
       "name": "黑色双肩包",
       "description": "日常出差用",
       "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
@@ -368,7 +417,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```
 
 失败响应：
-- `400`: `q` 为空/超过最大长度
+- `400`: `q` 为空/超过最大长度，或 `category_id` 为空/非法/不存在
 - `401`: access token 缺失、非法或过期
 - `500`: 查询 item 列表或生成图片访问 URL 失败
 
@@ -393,6 +442,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 {
   "id": "6821c0c1f1b2f4d5a6b7c8d9",
   "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "category_id": "6821c0c1f1b2f4d5a6b7c8a2",
+  "category_key": "electronics",
+  "category_name": "电子设备",
   "name": "黑色双肩包",
   "description": "日常出差用",
   "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
@@ -430,6 +482,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 请求字段：
 - `name`: string，必填
 - `description`: string，可选
+- `category_id`: string，可选；不传时保留原 category，传空字符串时后端使用 `key=other` 的 category
 - `image`: 文件，可选
 
 成功响应：
@@ -438,6 +491,9 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 {
   "id": "6821c0c1f1b2f4d5a6b7c8d9",
   "user_id": "6821c0c1f1b2f4d5a6b7c8d1",
+  "category_id": "6821c0c1f1b2f4d5a6b7c8a2",
+  "category_key": "electronics",
+  "category_name": "电子设备",
   "name": "黑色双肩包升级版",
   "description": "更新后的描述",
   "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.png?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
@@ -448,7 +504,7 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 ```
 
 失败响应：
-- `400`: 缺少 `name`，`item_id` 非法，或上传文件不是有效图片
+- `400`: 缺少 `name`，`item_id` 非法，`category_id` 非法/不存在，或上传文件不是有效图片
 - `401`: access token 缺失、非法或过期
 - `404`: item 不存在
 - `502`: 图片上传失败

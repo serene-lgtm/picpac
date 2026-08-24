@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"pack_mate/internal/domain"
+	"pack_mate/internal/repository"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -17,6 +18,7 @@ const itemCollectionName = "items"
 type itemDocument struct {
 	ID                       bson.ObjectID     `json:"id" bson:"_id,omitempty"`
 	UserID                   bson.ObjectID     `json:"user_id" bson:"uid"`
+	CategoryID               bson.ObjectID     `json:"category_id" bson:"cid"`
 	Name                     string            `json:"name" bson:"nm"`
 	Description              string            `json:"description" bson:"desc"`
 	SourceImageObjectKey     string            `json:"source_image_object_key" bson:"siok"`
@@ -61,6 +63,27 @@ func (r *ItemRepository) ListByUserID(ctx context.Context, userID bson.ObjectID)
 		"uid": userID,
 		"st":  bson.M{"$ne": domain.ItemStatusDeleted},
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	return newDomainItems(docs), nil
+}
+
+// ListByFilter returns non-deleted user items matching the given filters.
+func (r *ItemRepository) ListByFilter(ctx context.Context, itemFilter repository.ItemFilter) ([]domain.Item, error) {
+	filter := bson.M{
+		"uid": itemFilter.UserID,
+		"st":  bson.M{"$ne": domain.ItemStatusDeleted},
+	}
+	if itemFilter.HasCategoryID {
+		filter["cid"] = itemFilter.CategoryID
+	}
+	if itemFilter.HasKeyword {
+		filter["$or"] = itemKeywordConditions(itemFilter.Keyword)
+	}
+
+	docs, err := r.find(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -138,17 +161,21 @@ func (r *ItemRepository) DeleteByID(ctx context.Context, itemID bson.ObjectID) e
 }
 
 func itemKeywordSearchFilter(keyword string) bson.M {
+	return bson.M{
+		"$or": itemKeywordConditions(keyword),
+		"st":  bson.M{"$ne": domain.ItemStatusDeleted},
+	}
+}
+
+func itemKeywordConditions(keyword string) bson.A {
 	keywordPattern := bson.M{
 		"$regex":   regexp.QuoteMeta(keyword),
 		"$options": "i",
 	}
 
-	return bson.M{
-		"$or": bson.A{
-			bson.M{"nm": keywordPattern},
-			bson.M{"desc": keywordPattern},
-		},
-		"st": bson.M{"$ne": domain.ItemStatusDeleted},
+	return bson.A{
+		bson.M{"nm": keywordPattern},
+		bson.M{"desc": keywordPattern},
 	}
 }
 
@@ -175,6 +202,7 @@ func newItemDocument(item *domain.Item) itemDocument {
 	return itemDocument{
 		ID:                       item.ID,
 		UserID:                   item.UserID,
+		CategoryID:               item.CategoryID,
 		Name:                     item.Name,
 		Description:              item.Description,
 		SourceImageObjectKey:     item.SourceImageObjectKey,
@@ -190,6 +218,7 @@ func newDomainItem(doc itemDocument) domain.Item {
 	return domain.Item{
 		ID:                       doc.ID,
 		UserID:                   doc.UserID,
+		CategoryID:               doc.CategoryID,
 		Name:                     doc.Name,
 		Description:              doc.Description,
 		SourceImageObjectKey:     doc.SourceImageObjectKey,
