@@ -539,6 +539,70 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `404`: item 不存在
 - `500`: 删除 item 失败
 
+### Recommend Pack Items
+
+`POST /api/v1/ai/pack/item-recommendations`
+
+用途：
+- 根据用户输入的 pack name 和可选 description，推荐当前用户已有 item 中适合加入该 pack 的 item
+- 此接口只做推荐，不会创建 pack、不会创建 item、不会修改 pack/checklist/item
+- 后端会读取当前用户的 item 列表并交给 DeepSeek 做语义推荐
+- 当前最多返回 15 个推荐 item；前端可在收到结果后与本地已勾选状态合并，再询问用户是否一键添加
+
+请求类型：
+- `application/json`
+
+请求头：
+- `Authorization: Bearer <access_token>`
+
+请求字段：
+- `pack_name`: string，必填；去首尾空格后长度 1-64
+- `description`: string，可选；去首尾空格后最大长度 200
+
+请求示例：
+
+```json
+{
+  "pack_name": "日本出差",
+  "description": "东京 5 天商务行程"
+}
+```
+
+成功响应：
+
+```json
+{
+  "recommended_items": [
+    {
+      "id": "6821c0c1f1b2f4d5a6b7c8d9",
+      "name": "护照"
+    },
+    {
+      "id": "6821c0c1f1b2f4d5a6b7c8da",
+      "name": "充电器"
+    }
+  ]
+}
+```
+
+空推荐响应：
+
+```json
+{
+  "recommended_items": []
+}
+```
+
+说明：
+- 返回值只包含推荐 item 的 `id` 和 `name`，不返回 category、图片 URL 或完整 item 详情
+- 推荐结果只会包含当前用户已有且未逻辑删除的 item
+- AI 返回结果会在后端做 ref 校验、去重和最多 15 个的截断兜底
+
+失败响应：
+- `400`: 缺少 `pack_name`，`pack_name` 超长，或 `description` 超长
+- `401`: access token 缺失、非法或过期
+- `500`: 查询 item/category 列表失败，或 DeepSeek 推荐失败
+
 ### Create Pack
 
 `POST /api/v1/pack`
