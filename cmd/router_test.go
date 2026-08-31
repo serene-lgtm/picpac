@@ -55,6 +55,12 @@ func (s *fakeCategoryService) ResolveCategoryID(_ context.Context, _ string) (bs
 	return bson.NewObjectID(), nil
 }
 
+type fakeAISuggestionService struct{}
+
+func (s *fakeAISuggestionService) RecommendPackItems(_ context.Context, _ request.RecommendPackItemsInput) ([]service.RecommendedItem, error) {
+	return []service.RecommendedItem{}, nil
+}
+
 type fakePackService struct{}
 
 func (s *fakePackService) CreatePack(_ context.Context, _ request.CreatePackInput) (*domain.Pack, error) {
@@ -178,12 +184,13 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeCategoryService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
+	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeCategoryService{}, &fakeAISuggestionService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
 
 	tests := []struct {
 		method string
 		path   string
 	}{
+		{method: http.MethodPost, path: "/api/v1/ai/pack/item-recommendations"},
 		{method: http.MethodPost, path: "/api/v1/item"},
 		{method: http.MethodGet, path: "/api/v1/item"},
 		{method: http.MethodGet, path: "/api/v1/item/" + bson.NewObjectID().Hex()},
@@ -229,7 +236,7 @@ func TestRegisterAPIRoutesDoesNotExposeLegacyPackUpdate(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeCategoryService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
+	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeCategoryService{}, &fakeAISuggestionService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/pack/"+bson.NewObjectID().Hex(), bytes.NewBuffer(nil))
 	recorder := httptest.NewRecorder()

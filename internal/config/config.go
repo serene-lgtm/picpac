@@ -12,6 +12,7 @@ type Configuration struct {
 	Server    ServerConfig    `json:"server"`
 	OSS       OSSConfig       `json:"oss"`
 	Dashscope DashscopeConfig `json:"dashscope"`
+	Deepseek  DeepseekConfig  `json:"deepseek"`
 	CORS      CORSConfig      `json:"cors"`
 	Mongo     MongoConfig     `json:"mongo"`
 	Auth      AuthConfig      `json:"auth"`
@@ -47,6 +48,13 @@ type OSSConfig struct {
 type DashscopeConfig struct {
 	APIKey     string `json:"api_key"`
 	ImageModel string `json:"image_model"`
+}
+
+// DeepseekConfig defines DeepSeek chat completion settings.
+type DeepseekConfig struct {
+	APIKey  string `json:"api_key"`
+	Model   string `json:"model"`
+	BaseURL string `json:"base_url"`
 }
 
 // CORSConfig defines allowed origins.
@@ -135,6 +143,12 @@ func validate(cfg *Configuration) error {
 		return fmt.Errorf("invalid config: dashscope.api_key is required")
 	case strings.TrimSpace(cfg.Dashscope.ImageModel) == "":
 		return fmt.Errorf("invalid config: dashscope.image_model is required")
+	case strings.TrimSpace(cfg.Deepseek.APIKey) == "":
+		return fmt.Errorf("invalid config: deepseek.api_key is required")
+	case strings.TrimSpace(cfg.Deepseek.Model) == "":
+		return fmt.Errorf("invalid config: deepseek.model is required")
+	case strings.TrimSpace(cfg.Deepseek.BaseURL) == "":
+		return fmt.Errorf("invalid config: deepseek.base_url is required")
 	case strings.TrimSpace(cfg.Mongo.URI) == "":
 		return fmt.Errorf("invalid config: mongo.uri is required")
 	case strings.TrimSpace(cfg.Mongo.Database) == "":

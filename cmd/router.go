@@ -9,6 +9,8 @@ import (
 	"pack_mate/internal/handler"
 	mongodb "pack_mate/internal/repository/mongodb"
 	"pack_mate/internal/service"
+	"pack_mate/internal/service/agent"
+	"pack_mate/internal/service/llm"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/gin-gonic/gin"
@@ -34,17 +36,21 @@ func newRouter(cfg *config.Configuration, bucket *oss.Bucket, db *mongo.Database
 	packService := service.NewPackService(packRepo, itemRepo)
 	checklistService := service.NewChecklistService(checklistRepo, itemRepo)
 	authService := service.NewAuthService(userRepo, authIdentityRepo, phoneCodeRepo, refreshTokenRepo, uploadService, service.NewFakeSMSService(), tokenService, cfg.Auth)
+	chatClient := llm.NewDeepSeekChatClient(cfg.Deepseek)
+	recommendationAgent := agent.NewRecommendationPlannerAgent(chatClient)
+	aiSuggestionService := service.NewAISuggestionService(itemService, categoryService, recommendationAgent)
 
-	registerAPIRoutes(router, itemService, packService, checklistService, categoryService, authService, tokenService, uploadService)
+	registerAPIRoutes(router, itemService, packService, checklistService, categoryService, aiSuggestionService, authService, tokenService, uploadService)
 
 	return router
 }
 
-func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService, checklistService service.ChecklistService, categoryService service.CategoryService, authService service.AuthService, tokenService service.TokenService, objectURLSigner service.ObjectURLSigner) {
+func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService, checklistService service.ChecklistService, categoryService service.CategoryService, aiSuggestionService service.AISuggestionService, authService service.AuthService, tokenService service.TokenService, objectURLSigner service.ObjectURLSigner) {
 	itemHandler := handler.NewItemHandler(itemService, categoryService, objectURLSigner)
 	packHandler := handler.NewPackHandler(packService)
 	checklistHandler := handler.NewChecklistHandler(checklistService)
 	categoryHandler := handler.NewCategoryHandler(categoryService)
+	aiHandler := handler.NewAIHandler(aiSuggestionService)
 	authHandler := handler.NewAuthHandler(authService, objectURLSigner)
 	authMiddleware := handler.NewAuthMiddleware(tokenService, authService)
 
@@ -58,6 +64,10 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 	authRoutes.DELETE("/me", authMiddleware.RequireAuth(), authHandler.DeleteMe)
 	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
 	router.PUT("/api/v1/me/profile", authMiddleware.RequireAuth(), authHandler.UpdateMyProfile)
+
+	aiRoutes := router.Group("/api/v1/ai")
+	aiRoutes.Use(authMiddleware.RequireAuth())
+	aiRoutes.POST("/pack/item-recommendations", aiHandler.RecommendPackItems)
 
 	itemRoutes := router.Group("/api/v1/item")
 	itemRoutes.Use(authMiddleware.RequireAuth())
