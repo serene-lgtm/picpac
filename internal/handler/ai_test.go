@@ -20,16 +20,26 @@ import (
 
 type fakeAISuggestionHandlerService struct {
 	recommendedItems []service.RecommendedItem
+	draftItems       []service.ItemDraft
 	err              error
-	input            request.RecommendPackItemsInput
+	recommendInput   request.RecommendPackItemsInput
+	draftInput       request.GenerateItemDraftsInput
 }
 
 func (s *fakeAISuggestionHandlerService) RecommendPackItems(_ context.Context, input request.RecommendPackItemsInput) ([]service.RecommendedItem, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
-	s.input = input
+	s.recommendInput = input
 	return s.recommendedItems, nil
+}
+
+func (s *fakeAISuggestionHandlerService) GenerateItemDrafts(_ context.Context, input request.GenerateItemDraftsInput) ([]service.ItemDraft, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	s.draftInput = input
+	return s.draftItems, nil
 }
 
 func newAuthenticatedAIRouter(t *testing.T, aiService *fakeAISuggestionHandlerService) (*gin.Engine, string, string) {
@@ -47,6 +57,7 @@ func newAuthenticatedAIRouter(t *testing.T, aiService *fakeAISuggestionHandlerSe
 	authMiddleware := NewAuthMiddleware(tokenService, &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}})
 	aiRoutes := router.Group("/api/v1/ai")
 	aiRoutes.Use(authMiddleware.RequireAuth())
+	aiRoutes.POST("/item-drafts", aiHandler.GenerateItemDrafts)
 	aiRoutes.POST("/pack/item-recommendations", aiHandler.RecommendPackItems)
 
 	return router, token, userID.Hex()
@@ -71,11 +82,11 @@ func TestRecommendPackItemsHandlerReturnsItems(t *testing.T) {
 	if !strings.Contains(recorder.Body.String(), itemID) || !strings.Contains(recorder.Body.String(), "护照") {
 		t.Fatalf("unexpected body: %s", recorder.Body.String())
 	}
-	if aiService.input.UserID != userID {
-		t.Fatalf("expected user id %s, got %s", userID, aiService.input.UserID)
+	if aiService.recommendInput.UserID != userID {
+		t.Fatalf("expected user id %s, got %s", userID, aiService.recommendInput.UserID)
 	}
-	if aiService.input.PackName != "日本出差" || aiService.input.Description != "东京5天" {
-		t.Fatalf("unexpected input: %+v", aiService.input)
+	if aiService.recommendInput.PackName != "日本出差" || aiService.recommendInput.Description != "东京5天" {
+		t.Fatalf("unexpected input: %+v", aiService.recommendInput)
 	}
 }
 
@@ -111,5 +122,53 @@ func TestRecommendPackItemsHandlerMapsServiceValidationError(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+}
+
+func TestGenerateItemDraftsHandlerReturnsDrafts(t *testing.T) {
+	t.Parallel()
+
+	categoryID := bson.NewObjectID().Hex()
+	aiService := &fakeAISuggestionHandlerService{draftItems: []service.ItemDraft{{
+		Name:         "手机",
+		CategoryID:   categoryID,
+		CategoryKey:  "electronics",
+		CategoryName: "电子设备",
+	}}}
+	router, token, userID := newAuthenticatedAIRouter(t, aiService)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ai/item-drafts", bytes.NewBufferString(`{"text":" 请帮我添加手机 "}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "手机") || !strings.Contains(recorder.Body.String(), categoryID) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+	if aiService.draftInput.UserID != userID || aiService.draftInput.Text != "请帮我添加手机" {
+		t.Fatalf("unexpected input: %+v", aiService.draftInput)
+	}
+}
+
+func TestGenerateItemDraftsHandlerRequiresText(t *testing.T) {
+	t.Parallel()
+
+	router, token, _ := newAuthenticatedAIRouter(t, &fakeAISuggestionHandlerService{})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ai/item-drafts", bytes.NewBufferString(`{"text":" "}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "text is required") {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
 	}
 }

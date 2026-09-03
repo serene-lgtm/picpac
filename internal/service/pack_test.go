@@ -117,6 +117,9 @@ type fakePackItemRepository struct {
 }
 
 func (r *fakePackItemRepository) Create(_ context.Context, _ *domain.Item) error { return nil }
+func (r *fakePackItemRepository) CreateMany(_ context.Context, _ []domain.Item) error {
+	return nil
+}
 func (r *fakePackItemRepository) ListAll(_ context.Context) ([]domain.Item, error) {
 	return nil, nil
 }

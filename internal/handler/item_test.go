@@ -25,6 +25,7 @@ type fakeItemService struct {
 	items        []domain.Item
 	err          error
 	createInput  request.CreateItemInput
+	batchInput   request.BatchCreateItemsInput
 	listInput    request.ListItemsInput
 	gotItemID    string
 	gotUserID    string
@@ -81,6 +82,17 @@ func (s *fakeItemService) CreateItem(_ context.Context, input request.CreateItem
 		return nil, s.err
 	}
 	return s.defaultItem(), nil
+}
+
+func (s *fakeItemService) CreateItemsBatch(_ context.Context, input request.BatchCreateItemsInput) ([]domain.Item, error) {
+	s.batchInput = input
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.items != nil {
+		return s.items, nil
+	}
+	return []domain.Item{*s.defaultItem()}, nil
 }
 
 func (s *fakeItemService) ListItems(_ context.Context, input request.ListItemsInput) ([]domain.Item, error) {
@@ -147,6 +159,7 @@ func newAuthenticatedItemRouter(t *testing.T, itemService *fakeItemService) (*gi
 	itemRoutes := router.Group("/api/v1/item")
 	itemRoutes.Use(authMiddleware.RequireAuth())
 	itemRoutes.POST("", itemHandler.CreateItem)
+	itemRoutes.POST("/batch", itemHandler.CreateItemsBatch)
 	itemRoutes.GET("", itemHandler.ListItems)
 	itemRoutes.GET("/:item_id", itemHandler.GetItem)
 	itemRoutes.PUT("/:item_id", itemHandler.UpdateItem)
@@ -264,6 +277,58 @@ func TestCreateItemHandlerSignsImageURL(t *testing.T) {
 	}
 	if resp.SourceImageURL != "https://signed.example/items/item_1/source.jpg?Expires=3600&Signature=test" {
 		t.Fatalf("unexpected source_image_url: %s", resp.SourceImageURL)
+	}
+}
+
+func TestCreateItemsBatchHandlerUsesCurrentUserID(t *testing.T) {
+	t.Parallel()
+
+	categoryID := bson.NewObjectID().Hex()
+	itemService := &fakeItemService{items: []domain.Item{{
+		ID:         bson.NewObjectID(),
+		UserID:     bson.NewObjectID(),
+		CategoryID: bson.NewObjectID(),
+		Name:       "手机",
+		Status:     domain.ItemStatusCreated,
+	}}}
+	recorder := httptest.NewRecorder()
+	router, token, userID := newAuthenticatedItemRouter(t, itemService)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/item/batch", bytes.NewBufferString(`{"items":[{"name":"手机","category_id":"`+categoryID+`"}]}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if itemService.batchInput.UserID != userID {
+		t.Fatalf("expected user id %s, got %s", userID, itemService.batchInput.UserID)
+	}
+	if len(itemService.batchInput.Items) != 1 || itemService.batchInput.Items[0].Name != "手机" || itemService.batchInput.Items[0].CategoryID != categoryID {
+		t.Fatalf("unexpected batch input: %+v", itemService.batchInput)
+	}
+	if !strings.Contains(recorder.Body.String(), `"name":"手机"`) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestCreateItemsBatchHandlerRequiresItems(t *testing.T) {
+	t.Parallel()
+
+	recorder := httptest.NewRecorder()
+	router, token, _ := newAuthenticatedItemRouter(t, &fakeItemService{})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/item/batch", bytes.NewBufferString(`{"items":[]}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "items are required") {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
 	}
 }
 

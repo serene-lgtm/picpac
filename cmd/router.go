@@ -38,7 +38,8 @@ func newRouter(cfg *config.Configuration, bucket *oss.Bucket, db *mongo.Database
 	authService := service.NewAuthService(userRepo, authIdentityRepo, phoneCodeRepo, refreshTokenRepo, uploadService, service.NewFakeSMSService(), tokenService, cfg.Auth)
 	chatClient := llm.NewDeepSeekChatClient(cfg.Deepseek)
 	recommendationAgent := agent.NewRecommendationPlannerAgent(chatClient)
-	aiSuggestionService := service.NewAISuggestionService(itemService, categoryService, recommendationAgent)
+	itemDraftExtractionAgent := agent.NewChatItemDraftExtractionAgent(chatClient)
+	aiSuggestionService := service.NewAISuggestionService(itemService, categoryService, recommendationAgent, itemDraftExtractionAgent)
 
 	registerAPIRoutes(router, itemService, packService, checklistService, categoryService, aiSuggestionService, authService, tokenService, uploadService)
 
@@ -67,11 +68,13 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 
 	aiRoutes := router.Group("/api/v1/ai")
 	aiRoutes.Use(authMiddleware.RequireAuth())
+	aiRoutes.POST("/item-drafts", aiHandler.GenerateItemDrafts)
 	aiRoutes.POST("/pack/item-recommendations", aiHandler.RecommendPackItems)
 
 	itemRoutes := router.Group("/api/v1/item")
 	itemRoutes.Use(authMiddleware.RequireAuth())
 	itemRoutes.POST("", itemHandler.CreateItem)
+	itemRoutes.POST("/batch", itemHandler.CreateItemsBatch)
 	itemRoutes.GET("", itemHandler.ListItems)
 	itemRoutes.GET("/:item_id", itemHandler.GetItem)
 	itemRoutes.PUT("/:item_id", itemHandler.UpdateItem)

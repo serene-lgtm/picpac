@@ -42,6 +42,14 @@ func (r *fakeItemRepository) Create(_ context.Context, item *domain.Item) error 
 	return nil
 }
 
+func (r *fakeItemRepository) CreateMany(_ context.Context, items []domain.Item) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.listed = items
+	return nil
+}
+
 func (r *fakeItemRepository) ListAll(_ context.Context) ([]domain.Item, error) {
 	if r.err != nil {
 		return nil, r.err
@@ -271,6 +279,76 @@ func TestCreateItemRejectsMissingUserID(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "invalid input") {
 		t.Fatalf("expected invalid input, got %v", err)
+	}
+}
+
+func TestCreateItemsBatchCreatesItemsAtomically(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	categoryID := bson.NewObjectID()
+	repo := &fakeItemRepository{}
+	svc := NewItemService(repo, &fakeUploadService{}, &fakeItemCategoryService{categoryID: categoryID})
+
+	items, err := svc.CreateItemsBatch(context.Background(), request.BatchCreateItemsInput{
+		UserID: userID.Hex(),
+		Items: []request.BatchCreateItemInput{
+			{Name: " 手机 ", CategoryID: categoryID.Hex(), Description: "主力机"},
+			{Name: "充电线", CategoryID: categoryID.Hex()},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateItemsBatch returned error: %v", err)
+	}
+	if len(items) != 2 || len(repo.listed) != 2 {
+		t.Fatalf("expected two created items, got items=%+v repo=%+v", items, repo.listed)
+	}
+	if items[0].UserID != userID || items[0].CategoryID != categoryID || items[0].Name != "手机" {
+		t.Fatalf("unexpected first item: %+v", items[0])
+	}
+	if items[1].Status != domain.ItemStatusCreated {
+		t.Fatalf("expected created status, got %s", items[1].Status)
+	}
+}
+
+func TestCreateItemsBatchRejectsEmptyItems(t *testing.T) {
+	t.Parallel()
+
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{}, nil)
+
+	_, err := svc.CreateItemsBatch(context.Background(), request.BatchCreateItemsInput{
+		UserID: bson.NewObjectID().Hex(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "items are required") {
+		t.Fatalf("expected items required error, got %v", err)
+	}
+}
+
+func TestCreateItemsBatchRejectsInvalidCategory(t *testing.T) {
+	t.Parallel()
+
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{}, &fakeItemCategoryService{err: errors.New("invalid category")})
+
+	_, err := svc.CreateItemsBatch(context.Background(), request.BatchCreateItemsInput{
+		UserID: bson.NewObjectID().Hex(),
+		Items:  []request.BatchCreateItemInput{{Name: "手机", CategoryID: bson.NewObjectID().Hex()}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid category") {
+		t.Fatalf("expected invalid category error, got %v", err)
+	}
+}
+
+func TestCreateItemsBatchWrapsRepositoryError(t *testing.T) {
+	t.Parallel()
+
+	svc := NewItemService(&fakeItemRepository{err: errors.New("db down")}, &fakeUploadService{}, nil)
+
+	_, err := svc.CreateItemsBatch(context.Background(), request.BatchCreateItemsInput{
+		UserID: bson.NewObjectID().Hex(),
+		Items:  []request.BatchCreateItemInput{{Name: "手机"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "create items failed") {
+		t.Fatalf("expected create items failure, got %v", err)
 	}
 }
 

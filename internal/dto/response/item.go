@@ -20,6 +20,11 @@ type ListItemsResponse struct {
 	Items []ItemResponse `json:"items"`
 }
 
+// BatchCreateItemsResponse defines the API response for batch creating items.
+type BatchCreateItemsResponse struct {
+	Items []ItemResponse `json:"items"`
+}
+
 // DeleteItemResponse defines the API response for deleting an item.
 type DeleteItemResponse struct {
 	Deleted bool `json:"deleted"`
