@@ -20,7 +20,7 @@
     "base_url": "https://api.deepseek.com/v1/chat/completions"
   },
   "mongo": {
-    "uri": "mongodb://admin:password@localhost:27017/picpac?authSource=admin",
+    "uri": "mongodb://admin:password@127.0.0.1:27017/picpac?authSource=admin&replicaSet=rs0",
     "database": "picpac",
     "connect_timeout_seconds": 10,
     "max_pool_size": 20

@@ -20,6 +20,7 @@ type CategoryRepository interface {
 // ItemRepository defines persistence behavior for items.
 type ItemRepository interface {
 	Create(ctx context.Context, item *domain.Item) error
+	CreateMany(ctx context.Context, items []domain.Item) error
 	ListAll(ctx context.Context) ([]domain.Item, error)
 	ListByUserID(ctx context.Context, userID bson.ObjectID) ([]domain.Item, error)
 	ListByFilter(ctx context.Context, filter ItemFilter) ([]domain.Item, error)

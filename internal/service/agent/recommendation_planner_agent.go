@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"pack_mate/internal/service/llm"
 )
@@ -96,17 +95,9 @@ func (a *RecommendationPlannerAgent) Recommend(ctx context.Context, input Recomm
 	}
 
 	var recommendation recommendationPlannerContent
-	if err := json.Unmarshal([]byte(normalizeRecommendationJSON(content)), &recommendation); err != nil {
+	if err := json.Unmarshal([]byte(normalizeAgentJSON(content)), &recommendation); err != nil {
 		return nil, fmt.Errorf("decode recommendation planner response: %w", err)
 	}
 
 	return &RecommendationResult{Refs: recommendation.Refs}, nil
-}
-
-func normalizeRecommendationJSON(content string) string {
-	content = strings.TrimSpace(content)
-	content = strings.TrimPrefix(content, "```json")
-	content = strings.TrimPrefix(content, "```")
-	content = strings.TrimSuffix(content, "```")
-	return strings.TrimSpace(content)
 }

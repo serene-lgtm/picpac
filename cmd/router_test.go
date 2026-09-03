@@ -21,6 +21,10 @@ func (s *fakeItemService) CreateItem(_ context.Context, _ request.CreateItemInpu
 	return &domain.Item{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "item"}, nil
 }
 
+func (s *fakeItemService) CreateItemsBatch(_ context.Context, _ request.BatchCreateItemsInput) ([]domain.Item, error) {
+	return []domain.Item{{ID: bson.NewObjectID(), UserID: bson.NewObjectID(), Name: "item"}}, nil
+}
+
 func (s *fakeItemService) ListItems(_ context.Context, _ request.ListItemsInput) ([]domain.Item, error) {
 	return []domain.Item{}, nil
 }
@@ -59,6 +63,10 @@ type fakeAISuggestionService struct{}
 
 func (s *fakeAISuggestionService) RecommendPackItems(_ context.Context, _ request.RecommendPackItemsInput) ([]service.RecommendedItem, error) {
 	return []service.RecommendedItem{}, nil
+}
+
+func (s *fakeAISuggestionService) GenerateItemDrafts(_ context.Context, _ request.GenerateItemDraftsInput) ([]service.ItemDraft, error) {
+	return []service.ItemDraft{}, nil
 }
 
 type fakePackService struct{}
@@ -190,8 +198,10 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		method string
 		path   string
 	}{
+		{method: http.MethodPost, path: "/api/v1/ai/item-drafts"},
 		{method: http.MethodPost, path: "/api/v1/ai/pack/item-recommendations"},
 		{method: http.MethodPost, path: "/api/v1/item"},
+		{method: http.MethodPost, path: "/api/v1/item/batch"},
 		{method: http.MethodGet, path: "/api/v1/item"},
 		{method: http.MethodGet, path: "/api/v1/item/" + bson.NewObjectID().Hex()},
 		{method: http.MethodPut, path: "/api/v1/item/" + bson.NewObjectID().Hex()},

@@ -26,6 +26,7 @@ var maxItemSearchKeywordRunes = 50
 // ItemService defines item CRUD behavior.
 type ItemService interface {
 	CreateItem(ctx context.Context, input request.CreateItemInput) (*domain.Item, error)
+	CreateItemsBatch(ctx context.Context, input request.BatchCreateItemsInput) ([]domain.Item, error)
 	ListItems(ctx context.Context, input request.ListItemsInput) ([]domain.Item, error)
 	GetItem(ctx context.Context, itemID string, userID string) (*domain.Item, error)
 	UpdateItem(ctx context.Context, itemID string, userID string, input request.UpdateItemInput) (*domain.Item, error)
@@ -46,6 +47,8 @@ func NewItemService(repo repository.ItemRepository, uploader UploadService, cate
 		categories: categories,
 	}
 }
+
+const maxBatchCreateItemsCount = 50
 
 // CreateItem creates a new item.
 func (s *itemService) CreateItem(ctx context.Context, input request.CreateItemInput) (*domain.Item, error) {
@@ -91,6 +94,53 @@ func (s *itemService) CreateItem(ctx context.Context, input request.CreateItemIn
 	}
 
 	return item, nil
+}
+
+// CreateItemsBatch creates multiple items atomically.
+func (s *itemService) CreateItemsBatch(ctx context.Context, input request.BatchCreateItemsInput) ([]domain.Item, error) {
+	if len(input.Items) == 0 {
+		return nil, fmt.Errorf("items are required")
+	}
+	if len(input.Items) > maxBatchCreateItemsCount {
+		return nil, fmt.Errorf("items are too many")
+	}
+
+	userID, err := parseObjectID(input.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+
+	items := make([]domain.Item, 0, len(input.Items))
+	now := time.Now().UTC()
+	for _, itemInput := range input.Items {
+		name := strings.TrimSpace(itemInput.Name)
+		if name == "" {
+			return nil, fmt.Errorf("item name is required")
+		}
+		categoryID, err := s.resolveCategoryID(ctx, itemInput.CategoryID)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, domain.Item{
+			ID:                       bson.NewObjectID(),
+			UserID:                   userID,
+			CategoryID:               categoryID,
+			Name:                     name,
+			Description:              strings.TrimSpace(itemInput.Description),
+			SourceImageObjectKey:     "",
+			ImageThumbnailObjectKey:  "",
+			AIRenderedImageObjectKey: "",
+			Status:                   domain.ItemStatusCreated,
+			CreatedAt:                now,
+			UpdatedAt:                now,
+		})
+	}
+
+	if err := s.repo.CreateMany(ctx, items); err != nil {
+		return nil, fmt.Errorf("create items failed: %w", err)
+	}
+
+	return items, nil
 }
 
 // ListItems lists all items or searches items by keyword.
@@ -211,7 +261,7 @@ func (s *itemService) getCategory(ctx context.Context, categoryID string) (*doma
 	if s.categories == nil {
 		objectID, err := parseObjectID(categoryID)
 		if err != nil {
-			return nil, fmt.Errorf("invalid category")
+			return nil, fmt.Errorf("invalid category %s: ", categoryID)
 		}
 		return &domain.Category{ID: objectID}, nil
 	}

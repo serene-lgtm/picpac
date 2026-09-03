@@ -24,6 +24,10 @@ func (s *fakeAIItemService) CreateItem(_ context.Context, _ request.CreateItemIn
 	return nil, nil
 }
 
+func (s *fakeAIItemService) CreateItemsBatch(_ context.Context, _ request.BatchCreateItemsInput) ([]domain.Item, error) {
+	return nil, nil
+}
+
 func (s *fakeAIItemService) ListItems(_ context.Context, input request.ListItemsInput) ([]domain.Item, error) {
 	if s.err != nil {
 		return nil, s.err
@@ -75,6 +79,22 @@ type fakeRecommendationAgent struct {
 	input  agent.RecommendationInput
 }
 
+type fakeItemDraftExtractionAgent struct {
+	drafts []agent.ItemDraft
+	err    error
+	called bool
+	input  agent.ItemDraftExtractionInput
+}
+
+func (a *fakeItemDraftExtractionAgent) ExtractItemDrafts(_ context.Context, input agent.ItemDraftExtractionInput) ([]agent.ItemDraft, error) {
+	a.called = true
+	a.input = input
+	if a.err != nil {
+		return nil, a.err
+	}
+	return a.drafts, nil
+}
+
 func (a *fakeRecommendationAgent) Recommend(_ context.Context, input agent.RecommendationInput) (*agent.RecommendationResult, error) {
 	a.called = true
 	a.input = input
@@ -108,6 +128,7 @@ func TestAISuggestionRecommendsExistingItems(t *testing.T) {
 		&fakeAIItemService{items: items},
 		&fakeAICategoryService{categories: []domain.Category{{ID: categoryID, Key: "electronics", Name: "电子设备"}}},
 		recommender,
+		&fakeItemDraftExtractionAgent{},
 	)
 
 	recommendedItems, err := svc.RecommendPackItems(context.Background(), request.RecommendPackItemsInput{
@@ -146,6 +167,7 @@ func TestAISuggestionReturnsEmptyWhenUserHasNoItems(t *testing.T) {
 		&fakeAIItemService{},
 		&fakeAICategoryService{},
 		recommender,
+		&fakeItemDraftExtractionAgent{},
 	)
 
 	recommendedItems, err := svc.RecommendPackItems(context.Background(), request.RecommendPackItemsInput{
@@ -166,7 +188,7 @@ func TestAISuggestionReturnsEmptyWhenUserHasNoItems(t *testing.T) {
 func TestAISuggestionRequiresPackName(t *testing.T) {
 	t.Parallel()
 
-	svc := NewAISuggestionService(&fakeAIItemService{}, &fakeAICategoryService{}, &fakeRecommendationAgent{})
+	svc := NewAISuggestionService(&fakeAIItemService{}, &fakeAICategoryService{}, &fakeRecommendationAgent{}, &fakeItemDraftExtractionAgent{})
 
 	_, err := svc.RecommendPackItems(context.Background(), request.RecommendPackItemsInput{
 		UserID: bson.NewObjectID().Hex(),
@@ -183,6 +205,7 @@ func TestAISuggestionWrapsItemListError(t *testing.T) {
 		&fakeAIItemService{err: errors.New("db down")},
 		&fakeAICategoryService{},
 		&fakeRecommendationAgent{},
+		&fakeItemDraftExtractionAgent{},
 	)
 
 	_, err := svc.RecommendPackItems(context.Background(), request.RecommendPackItemsInput{
@@ -202,6 +225,7 @@ func TestAISuggestionWrapsPlannerError(t *testing.T) {
 		&fakeAIItemService{items: []domain.Item{{ID: bson.NewObjectID(), CategoryID: categoryID, Name: "充电器"}}},
 		&fakeAICategoryService{categories: []domain.Category{{ID: categoryID, Key: "electronics", Name: "电子设备"}}},
 		&fakeRecommendationAgent{err: errors.New("llm down")},
+		&fakeItemDraftExtractionAgent{},
 	)
 
 	_, err := svc.RecommendPackItems(context.Background(), request.RecommendPackItemsInput{
@@ -210,5 +234,81 @@ func TestAISuggestionWrapsPlannerError(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "recommend pack items failed") {
 		t.Fatalf("expected planner failure, got %v", err)
+	}
+}
+
+func TestAISuggestionGeneratesItemDrafts(t *testing.T) {
+	t.Parallel()
+
+	electronicsID := bson.NewObjectID()
+	otherID := bson.NewObjectID()
+	extractor := &fakeItemDraftExtractionAgent{
+		drafts: []agent.ItemDraft{
+			{Name: " 手机 ", CategoryKey: "electronics"},
+			{Name: "手机", CategoryKey: "electronics"},
+			{Name: "相机", CategoryKey: "unknown"},
+			{Name: "", CategoryKey: "electronics"},
+		},
+	}
+	svc := NewAISuggestionService(
+		&fakeAIItemService{},
+		&fakeAICategoryService{categories: []domain.Category{
+			{ID: electronicsID, Key: "electronics", Name: "电子设备"},
+			{ID: otherID, Key: "other", Name: "其他"},
+		}},
+		&fakeRecommendationAgent{},
+		extractor,
+	)
+
+	drafts, err := svc.GenerateItemDrafts(context.Background(), request.GenerateItemDraftsInput{
+		UserID: bson.NewObjectID().Hex(),
+		Text:   "请帮我添加手机，手机，相机",
+	})
+	if err != nil {
+		t.Fatalf("GenerateItemDrafts returned error: %v", err)
+	}
+	if len(drafts) != 2 {
+		t.Fatalf("expected 2 drafts, got %+v", drafts)
+	}
+	if drafts[0].Name != "手机" || drafts[0].CategoryID != electronicsID.Hex() {
+		t.Fatalf("unexpected first draft: %+v", drafts[0])
+	}
+	if drafts[1].Name != "相机" || drafts[1].CategoryID != otherID.Hex() || drafts[1].CategoryKey != "other" {
+		t.Fatalf("expected unknown category to fallback to other, got %+v", drafts[1])
+	}
+	if !extractor.called || len(extractor.input.Categories) != 2 {
+		t.Fatalf("expected extractor to receive categories, got %+v", extractor.input)
+	}
+}
+
+func TestAISuggestionGenerateItemDraftsRequiresText(t *testing.T) {
+	t.Parallel()
+
+	svc := NewAISuggestionService(&fakeAIItemService{}, &fakeAICategoryService{}, &fakeRecommendationAgent{}, &fakeItemDraftExtractionAgent{})
+
+	_, err := svc.GenerateItemDrafts(context.Background(), request.GenerateItemDraftsInput{
+		UserID: bson.NewObjectID().Hex(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "text is required") {
+		t.Fatalf("expected text required error, got %v", err)
+	}
+}
+
+func TestAISuggestionGenerateItemDraftsWrapsExtractorError(t *testing.T) {
+	t.Parallel()
+
+	svc := NewAISuggestionService(
+		&fakeAIItemService{},
+		&fakeAICategoryService{categories: []domain.Category{{ID: bson.NewObjectID(), Key: "other", Name: "其他"}}},
+		&fakeRecommendationAgent{},
+		&fakeItemDraftExtractionAgent{err: errors.New("llm down")},
+	)
+
+	_, err := svc.GenerateItemDrafts(context.Background(), request.GenerateItemDraftsInput{
+		UserID: bson.NewObjectID().Hex(),
+		Text:   "请帮我添加手机",
+	})
+	if err == nil || !strings.Contains(err.Error(), "extract item drafts failed") {
+		t.Fatalf("expected extractor failure, got %v", err)
 	}
 }

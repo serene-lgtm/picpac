@@ -141,6 +141,9 @@ type fakeChecklistItemRepository struct {
 }
 
 func (r *fakeChecklistItemRepository) Create(_ context.Context, _ *domain.Item) error { return nil }
+func (r *fakeChecklistItemRepository) CreateMany(_ context.Context, _ []domain.Item) error {
+	return nil
+}
 func (r *fakeChecklistItemRepository) ListAll(_ context.Context) ([]domain.Item, error) {
 	return nil, nil
 }

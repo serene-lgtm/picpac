@@ -47,6 +47,29 @@ func (r *ItemRepository) Create(ctx context.Context, item *domain.Item) error {
 	return err
 }
 
+// CreateMany inserts item documents into MongoDB in one transaction.
+func (r *ItemRepository) CreateMany(ctx context.Context, items []domain.Item) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	session, err := r.collection.Database().Client().StartSession()
+	if err != nil {
+		return err
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
+		docs := make([]any, 0, len(items))
+		for index := range items {
+			docs = append(docs, newItemDocument(&items[index]))
+		}
+		_, err := r.collection.InsertMany(sessionCtx, docs)
+		return nil, err
+	})
+	return err
+}
+
 // ListAll returns all non-deleted items ordered by creation time descending.
 func (r *ItemRepository) ListAll(ctx context.Context) ([]domain.Item, error) {
 	docs, err := r.find(ctx, bson.M{"st": bson.M{"$ne": domain.ItemStatusDeleted}})

@@ -68,6 +68,44 @@ func (h *ItemHandler) CreateItem(c *gin.Context) {
 	c.JSON(http.StatusOK, itemResponse)
 }
 
+// CreateItemsBatch handles batch item creation requests.
+func (h *ItemHandler) CreateItemsBatch(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization is required"})
+		return
+	}
+
+	var input request.BatchCreateItemsInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+		return
+	}
+	if len(input.Items) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "items are required"})
+		return
+	}
+	input.UserID = userID
+
+	items, err := h.svc.CreateItemsBatch(c.Request.Context(), input)
+	if err != nil {
+		respondItemError(c, err)
+		return
+	}
+
+	itemResponses := make([]response.ItemResponse, 0, len(items))
+	for _, item := range items {
+		itemResponse, err := h.buildItemResponse(c.Request.Context(), &item)
+		if err != nil {
+			respondItemError(c, err)
+			return
+		}
+		itemResponses = append(itemResponses, itemResponse)
+	}
+
+	c.JSON(http.StatusOK, response.BatchCreateItemsResponse{Items: itemResponses})
+}
+
 // ListItems handles item list requests.
 func (h *ItemHandler) ListItems(c *gin.Context) {
 	userID, ok := CurrentUserID(c)
@@ -222,6 +260,8 @@ func respondItemError(c *gin.Context, err error) {
 		strings.Contains(message, "invalid category"),
 		strings.Contains(message, "category_id is required"),
 		strings.Contains(message, "item name is required"),
+		strings.Contains(message, "items are required"),
+		strings.Contains(message, "items are too many"),
 		strings.Contains(message, "item search keyword is required"),
 		strings.Contains(message, "item search keyword is too long"):
 		status = http.StatusBadRequest

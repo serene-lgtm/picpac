@@ -45,7 +45,7 @@ func (s *categoryService) ListCategories(ctx context.Context) ([]domain.Category
 func (s *categoryService) GetCategory(ctx context.Context, categoryID string) (*domain.Category, error) {
 	objectID, err := parseObjectID(categoryID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid category")
+		return nil, fmt.Errorf("invalid category %s: ", categoryID)
 	}
 	return s.GetCategoryByID(ctx, objectID)
 }
@@ -59,7 +59,7 @@ func (s *categoryService) GetCategoryByID(ctx context.Context, categoryID bson.O
 	category, err := s.repo.GetByID(ctx, categoryID)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, fmt.Errorf("invalid category")
+			return nil, fmt.Errorf("invalid category %s: ", categoryID)
 		}
 		return nil, fmt.Errorf("get category failed: %w", err)
 	}
