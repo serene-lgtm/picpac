@@ -21,10 +21,11 @@ type userDocument struct {
 }
 
 type userProfileDocument struct {
-	Username        string            `json:"username" bson:"unm"`
-	Gender          domain.UserGender `json:"gender" bson:"gdr"`
-	Birthday        *time.Time        `json:"birthday" bson:"bdy"`
-	AvatarObjectKey string            `json:"avatar_object_key" bson:"aok"`
+	Username               string            `json:"username" bson:"unm"`
+	Gender                 domain.UserGender `json:"gender" bson:"gdr"`
+	Birthday               *time.Time        `json:"birthday" bson:"bdy"`
+	AvatarObjectKey        string            `json:"avatar_object_key" bson:"aok"`
+	AvatarDisplayObjectKey string            `json:"avatar_display_object_key" bson:"adok"`
 }
 
 // UserRepository stores user domain models in MongoDB.
@@ -97,18 +98,20 @@ func newDomainUser(doc userDocument) domain.User {
 
 func newUserProfileDocument(profile domain.UserProfile) userProfileDocument {
 	return userProfileDocument{
-		Username:        profile.Username,
-		Gender:          profile.Gender,
-		Birthday:        profile.Birthday,
-		AvatarObjectKey: profile.AvatarObjectKey,
+		Username:               profile.Username,
+		Gender:                 profile.Gender,
+		Birthday:               profile.Birthday,
+		AvatarObjectKey:        profile.AvatarObjectKey,
+		AvatarDisplayObjectKey: profile.AvatarDisplayObjectKey,
 	}
 }
 
 func newDomainUserProfile(doc userProfileDocument) domain.UserProfile {
 	return domain.UserProfile{
-		Username:        doc.Username,
-		Gender:          doc.Gender,
-		Birthday:        doc.Birthday,
-		AvatarObjectKey: doc.AvatarObjectKey,
+		Username:               doc.Username,
+		Gender:                 doc.Gender,
+		Birthday:               doc.Birthday,
+		AvatarObjectKey:        doc.AvatarObjectKey,
+		AvatarDisplayObjectKey: doc.AvatarDisplayObjectKey,
 	}
 }

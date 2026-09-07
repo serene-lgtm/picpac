@@ -126,7 +126,7 @@ func newAuthenticatedPackRouter(t *testing.T, packService *fakePackService) (*gi
 	if err != nil {
 		t.Fatalf("CreateAccessToken returned error: %v", err)
 	}
-	authMiddleware := NewAuthMiddleware(tokenService, &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}})
+	authMiddleware := NewAuthMiddleware(tokenService, &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "users/default/avatar.png"}, Status: domain.UserStatusCreated}})
 	packRoutes := router.Group("/api/v1/pack")
 	packRoutes.Use(authMiddleware.RequireAuth())
 	packRoutes.POST("", packHandler.CreatePack)

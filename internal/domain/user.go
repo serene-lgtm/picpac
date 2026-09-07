@@ -15,10 +15,11 @@ type User struct {
 }
 
 type UserProfile struct {
-	Username        string     `json:"username"`
-	Gender          UserGender `json:"gender"`
-	Birthday        *time.Time `json:"birthday"`
-	AvatarObjectKey string     `json:"avatar_object_key"`
+	Username               string     `json:"username"`
+	Gender                 UserGender `json:"gender"`
+	Birthday               *time.Time `json:"birthday"`
+	AvatarObjectKey        string     `json:"avatar_object_key"`
+	AvatarDisplayObjectKey string     `json:"avatar_display_object_key"`
 }
 
 type UserGender string

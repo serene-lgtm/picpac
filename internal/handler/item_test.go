@@ -143,6 +143,20 @@ func (s *fakeItemService) defaultItem() *domain.Item {
 	}
 }
 
+func testItemPNGBytes() []byte {
+	return []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0xd7, 0x63, 0xf8, 0x0f, 0x00, 0x01,
+		0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d, 0xb1, 0x00,
+		0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+		0x42, 0x60, 0x82,
+	}
+}
+
 func newAuthenticatedItemRouter(t *testing.T, itemService *fakeItemService) (*gin.Engine, string, string) {
 	t.Helper()
 
@@ -155,7 +169,7 @@ func newAuthenticatedItemRouter(t *testing.T, itemService *fakeItemService) (*gi
 	if err != nil {
 		t.Fatalf("CreateAccessToken returned error: %v", err)
 	}
-	authMiddleware := NewAuthMiddleware(tokenService, &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}})
+	authMiddleware := NewAuthMiddleware(tokenService, &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "users/default/avatar.png"}, Status: domain.UserStatusCreated}})
 	itemRoutes := router.Group("/api/v1/item")
 	itemRoutes.Use(authMiddleware.RequireAuth())
 	itemRoutes.POST("", itemHandler.CreateItem)
@@ -243,15 +257,53 @@ func TestCreateItemHandlerPassesCategoryID(t *testing.T) {
 	}
 }
 
+func TestCreateItemHandlerPassesMultiplePhotos(t *testing.T) {
+	t.Parallel()
+
+	itemService := &fakeItemService{}
+	recorder := httptest.NewRecorder()
+	router, token, _ := newAuthenticatedItemRouter(t, itemService)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("name", "相机")
+	for _, fileName := range []string{"front.png", "back.png"} {
+		part, err := writer.CreateFormFile("photos", fileName)
+		if err != nil {
+			t.Fatalf("CreateFormFile returned error: %v", err)
+		}
+		if _, err := part.Write(testItemPNGBytes()); err != nil {
+			t.Fatalf("write photo returned error: %v", err)
+		}
+	}
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/item", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if len(itemService.createInput.Photos) != 2 {
+		t.Fatalf("expected two photos, got %+v", itemService.createInput.Photos)
+	}
+}
+
 func TestCreateItemHandlerSignsImageURL(t *testing.T) {
 	t.Parallel()
 
 	itemService := &fakeItemService{item: &domain.Item{
-		ID:                   bson.NewObjectID(),
-		UserID:               bson.NewObjectID(),
-		Name:                 "黑色双肩包",
-		SourceImageObjectKey: "items/item_1/source.jpg",
-		Status:               domain.ItemStatusCreated,
+		ID:     bson.NewObjectID(),
+		UserID: bson.NewObjectID(),
+		Name:   "黑色双肩包",
+		Photos: []domain.ItemPhoto{{
+			ID:               bson.NewObjectID(),
+			SourceObjectKey:  "items/user_1/item_1/photos/photo_1/source.jpg",
+			DisplayObjectKey: "items/user_1/item_1/photos/photo_1/display.jpg",
+		}},
+		Status: domain.ItemStatusCreated,
 	}}
 	recorder := httptest.NewRecorder()
 	router, token, _ := newAuthenticatedItemRouter(t, itemService)
@@ -270,13 +322,60 @@ func TestCreateItemHandlerSignsImageURL(t *testing.T) {
 		t.Fatalf("expected 200, got %d", recorder.Code)
 	}
 	var resp struct {
-		SourceImageURL string `json:"source_image_url"`
+		CoverImageURL string `json:"cover_image_url"`
+		Photos        []struct {
+			SourceImageURL string `json:"source_image_url"`
+			ImageURL       string `json:"image_url"`
+		} `json:"photos"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if resp.SourceImageURL != "https://signed.example/items/item_1/source.jpg?Expires=3600&Signature=test" {
-		t.Fatalf("unexpected source_image_url: %s", resp.SourceImageURL)
+	expectedSourceURL := "https://signed.example/items/user_1/item_1/photos/photo_1/source.jpg?Expires=3600&Signature=test"
+	expectedDisplayURL := "https://signed.example/items/user_1/item_1/photos/photo_1/display.jpg?Expires=3600&Signature=test"
+	if resp.CoverImageURL != expectedDisplayURL || len(resp.Photos) != 1 ||
+		resp.Photos[0].SourceImageURL != expectedSourceURL || resp.Photos[0].ImageURL != expectedDisplayURL {
+		t.Fatalf("unexpected photo response: %+v", resp)
+	}
+}
+
+func TestCreateItemHandlerUsesDefaultCoverWhenPhotosEmpty(t *testing.T) {
+	t.Parallel()
+
+	itemService := &fakeItemService{item: &domain.Item{
+		ID:     bson.NewObjectID(),
+		UserID: bson.NewObjectID(),
+		Name:   "护照",
+		Status: domain.ItemStatusCreated,
+	}}
+	recorder := httptest.NewRecorder()
+	router, token, _ := newAuthenticatedItemRouter(t, itemService)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("name", "护照")
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/item", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	var resp struct {
+		CoverImageURL string `json:"cover_image_url"`
+		Photos        []struct {
+			ImageURL string `json:"image_url"`
+		} `json:"photos"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	expectedCoverURL := "https://signed.example/items/default/cover.jpg?Expires=3600&Signature=test"
+	if resp.CoverImageURL != expectedCoverURL || len(resp.Photos) != 0 {
+		t.Fatalf("unexpected default cover response: %+v", resp)
 	}
 }
 

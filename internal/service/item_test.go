@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"strings"
 	"testing"
@@ -124,8 +127,9 @@ func (r *fakeItemRepository) DeleteByID(_ context.Context, itemID bson.ObjectID)
 }
 
 type fakeUploadService struct {
-	objectKey string
-	err       error
+	objectKey  string
+	objectKeys []string
+	err        error
 }
 
 type fakeItemCategoryService struct {
@@ -166,21 +170,18 @@ func (s *fakeUploadService) Upload(_ context.Context, objectKey string, _ string
 		return s.err
 	}
 	s.objectKey = objectKey
+	s.objectKeys = append(s.objectKeys, objectKey)
 	return nil
 }
 
 func testPNGBytes() []byte {
-	return []byte{
-		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
-		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
-		0x54, 0x08, 0xd7, 0x63, 0xf8, 0x0f, 0x00, 0x01,
-		0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d, 0xb1, 0x00,
-		0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
-		0x42, 0x60, 0x82,
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var body bytes.Buffer
+	if err := png.Encode(&body, img); err != nil {
+		panic(err)
 	}
+	return body.Bytes()
 }
 
 func TestCreateItemStoresItemWithoutImage(t *testing.T) {
@@ -208,7 +209,7 @@ func TestCreateItemStoresItemWithoutImage(t *testing.T) {
 	if item.CategoryID != categoryID {
 		t.Fatalf("expected category id %s, got %s", categoryID.Hex(), item.CategoryID.Hex())
 	}
-	if item.Name != "黑色双肩包" || item.SourceImageObjectKey != "" {
+	if item.Name != "黑色双肩包" || len(item.Photos) != 0 {
 		t.Fatalf("unexpected item: %+v", item)
 	}
 	if item.Status != domain.ItemStatusCreated {
@@ -240,19 +241,77 @@ func TestCreateItemUploadsImageWhenProvided(t *testing.T) {
 	svc := NewItemService(repo, uploader, nil)
 
 	item, err := svc.CreateItem(context.Background(), request.CreateItemInput{
-		UserID:   userID.Hex(),
-		Name:     "黑色双肩包",
-		File:     bytes.NewReader(testPNGBytes()),
-		FileName: "bag.jpg",
+		UserID: userID.Hex(),
+		Name:   "黑色双肩包",
+		Photos: []request.ItemPhotoUploadInput{{
+			File:     bytes.NewReader(testPNGBytes()),
+			FileName: "bag.jpg",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("CreateItem returned error: %v", err)
 	}
-	if item.SourceImageObjectKey == "" {
+	if len(item.Photos) != 1 || item.Photos[0].SourceObjectKey == "" {
 		t.Fatalf("expected source image object key to be populated")
 	}
-	if item.SourceImageObjectKey != uploader.objectKey {
-		t.Fatalf("expected source image object key %s, got %s", uploader.objectKey, item.SourceImageObjectKey)
+	if len(uploader.objectKeys) != 2 {
+		t.Fatalf("expected source and display uploads, got %+v", uploader.objectKeys)
+	}
+	if item.Photos[0].SourceObjectKey != uploader.objectKeys[0] || item.Photos[0].DisplayObjectKey != uploader.objectKeys[1] {
+		t.Fatalf("expected source/display object keys %+v, got %+v", uploader.objectKeys, item.Photos[0])
+	}
+	expectedPrefix := "items/user_" + userID.Hex() + "/item_" + item.ID.Hex() + "/photos/photo_" + item.Photos[0].ID.Hex() + "/source"
+	if !strings.HasPrefix(item.Photos[0].SourceObjectKey, expectedPrefix) {
+		t.Fatalf("expected photo object key prefix %s, got %s", expectedPrefix, item.Photos[0].SourceObjectKey)
+	}
+	expectedDisplayKey := "items/user_" + userID.Hex() + "/item_" + item.ID.Hex() + "/photos/photo_" + item.Photos[0].ID.Hex() + "/display.jpg"
+	if item.Photos[0].DisplayObjectKey != expectedDisplayKey {
+		t.Fatalf("expected display object key %s, got %s", expectedDisplayKey, item.Photos[0].DisplayObjectKey)
+	}
+}
+
+func TestCreateItemUploadsMultiplePhotosInOrder(t *testing.T) {
+	t.Parallel()
+
+	uploader := &fakeUploadService{}
+	svc := NewItemService(&fakeItemRepository{}, uploader, nil)
+
+	item, err := svc.CreateItem(context.Background(), request.CreateItemInput{
+		UserID: bson.NewObjectID().Hex(),
+		Name:   "相机",
+		Photos: []request.ItemPhotoUploadInput{
+			{File: bytes.NewReader(testPNGBytes()), FileName: "front.png"},
+			{File: bytes.NewReader(testPNGBytes()), FileName: "back.png"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateItem returned error: %v", err)
+	}
+	if len(item.Photos) != 2 || len(uploader.objectKeys) != 4 {
+		t.Fatalf("expected two uploaded photos, got item=%+v uploaded=%+v", item.Photos, uploader.objectKeys)
+	}
+	if item.Photos[0].SourceObjectKey != uploader.objectKeys[0] || item.Photos[0].DisplayObjectKey != uploader.objectKeys[1] ||
+		item.Photos[1].SourceObjectKey != uploader.objectKeys[2] || item.Photos[1].DisplayObjectKey != uploader.objectKeys[3] {
+		t.Fatalf("expected photo order to follow upload order, got item=%+v uploaded=%+v", item.Photos, uploader.objectKeys)
+	}
+}
+
+func TestCreateItemRejectsTooManyPhotos(t *testing.T) {
+	t.Parallel()
+
+	uploads := make([]request.ItemPhotoUploadInput, 0, maxItemPhotosCount+1)
+	for index := 0; index < maxItemPhotosCount+1; index++ {
+		uploads = append(uploads, request.ItemPhotoUploadInput{File: bytes.NewReader(testPNGBytes()), FileName: "photo.png"})
+	}
+	svc := NewItemService(&fakeItemRepository{}, &fakeUploadService{}, nil)
+
+	_, err := svc.CreateItem(context.Background(), request.CreateItemInput{
+		UserID: bson.NewObjectID().Hex(),
+		Name:   "相机",
+		Photos: uploads,
+	})
+	if err == nil || !strings.Contains(err.Error(), "item photos are too many") {
+		t.Fatalf("expected too many photos error, got %v", err)
 	}
 }
 
@@ -591,13 +650,17 @@ func TestUpdateItemReplacesFieldsAndOptionalImage(t *testing.T) {
 	categoryID := bson.NewObjectID()
 	repo := &fakeItemRepository{
 		got: &domain.Item{
-			ID:                   itemID,
-			UserID:               userID,
-			Name:                 "旧名称",
-			Description:          "old",
-			SourceImageObjectKey: "items/item_old/source.jpg",
-			Status:               domain.ItemStatusCreated,
-			UpdatedAt:            time.Now().Add(-time.Hour),
+			ID:          itemID,
+			UserID:      userID,
+			Name:        "旧名称",
+			Description: "old",
+			Photos: []domain.ItemPhoto{{
+				ID:               bson.NewObjectID(),
+				SourceObjectKey:  "items/user_old/item_old/photos/photo_old/source.jpg",
+				DisplayObjectKey: "items/user_old/item_old/photos/photo_old/source.jpg",
+			}},
+			Status:    domain.ItemStatusCreated,
+			UpdatedAt: time.Now().Add(-time.Hour),
 		},
 	}
 	uploader := &fakeUploadService{}
@@ -607,8 +670,11 @@ func TestUpdateItemReplacesFieldsAndOptionalImage(t *testing.T) {
 		CategoryID:    categoryID.Hex(),
 		HasCategoryID: true,
 		Name:          "新名称",
-		File:          bytes.NewReader(testPNGBytes()),
-		FileName:      "bag.png",
+		Photos: []request.ItemPhotoUploadInput{{
+			File:     bytes.NewReader(testPNGBytes()),
+			FileName: "bag.png",
+		}},
+		HasPhotos: true,
 	})
 	if err != nil {
 		t.Fatalf("UpdateItem returned error: %v", err)
@@ -619,8 +685,8 @@ func TestUpdateItemReplacesFieldsAndOptionalImage(t *testing.T) {
 	if repo.updated.CategoryID != categoryID {
 		t.Fatalf("expected category id %s, got %s", categoryID.Hex(), repo.updated.CategoryID.Hex())
 	}
-	if item.SourceImageObjectKey != uploader.objectKey {
-		t.Fatalf("expected image object key %s, got %s", uploader.objectKey, item.SourceImageObjectKey)
+	if len(item.Photos) != 1 || len(uploader.objectKeys) != 2 || item.Photos[0].SourceObjectKey != uploader.objectKeys[0] || item.Photos[0].DisplayObjectKey != uploader.objectKeys[1] {
+		t.Fatalf("expected source/display image object keys %+v, got %+v", uploader.objectKeys, item.Photos)
 	}
 }
 
