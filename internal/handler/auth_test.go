@@ -82,7 +82,7 @@ func (s *fakeAuthService) UpdateMyProfile(_ context.Context, _ string, input req
 		}
 		user.Profile.Birthday = &birthday
 	}
-	user.Profile.AvatarObjectKey = "user-avatar/user_1.png"
+	user.Profile.AvatarObjectKey = "users/user_1/profile/avatar/source.png"
 
 	return user, nil
 }
@@ -101,7 +101,7 @@ func (s *fakeAuthService) defaultUser() *domain.User {
 		Profile: domain.UserProfile{
 			Username:        "用户8000",
 			Gender:          "",
-			AvatarObjectKey: "user-avatar/default.jpg",
+			AvatarObjectKey: "users/default/avatar.png",
 		},
 		Status: domain.UserStatusCreated,
 	}
@@ -149,8 +149,9 @@ func TestLoginWithPhoneHandlerReturnsTokens(t *testing.T) {
 		RefreshToken string `json:"refresh_token"`
 		User         struct {
 			Profile struct {
-				Username  string `json:"username"`
-				AvatarURL string `json:"avatar_url"`
+				Username        string `json:"username"`
+				AvatarURL       string `json:"avatar_url"`
+				AvatarSourceURL string `json:"avatar_source_url"`
 			} `json:"profile"`
 		} `json:"user"`
 	}
@@ -160,8 +161,11 @@ func TestLoginWithPhoneHandlerReturnsTokens(t *testing.T) {
 	if resp.AccessToken == "" || resp.RefreshToken == "" || resp.User.Profile.Username != "用户8000" {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
-	if resp.User.Profile.AvatarURL != "https://signed.example/user-avatar/default.jpg?Expires=3600&Signature=test" {
+	if resp.User.Profile.AvatarURL != "https://signed.example/users/default/avatar.png?Expires=3600&Signature=test" {
 		t.Fatalf("unexpected avatar_url: %s", resp.User.Profile.AvatarURL)
+	}
+	if resp.User.Profile.AvatarSourceURL != "https://signed.example/users/default/avatar.png?Expires=3600&Signature=test" {
+		t.Fatalf("unexpected avatar_source_url: %s", resp.User.Profile.AvatarSourceURL)
 	}
 }
 
@@ -241,7 +245,7 @@ func TestMeHandlerReturnsCurrentUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAccessToken returned error: %v", err)
 	}
-	authHandler := NewAuthHandler(&fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}}, fakeObjectURLSigner{})
+	authHandler := NewAuthHandler(&fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "users/default/avatar.png"}, Status: domain.UserStatusCreated}}, fakeObjectURLSigner{})
 	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
 	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
 
@@ -257,6 +261,99 @@ func TestMeHandlerReturnsCurrentUser(t *testing.T) {
 	}
 }
 
+func TestMeHandlerReturnsDisplayAndSourceAvatarURLs(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	tokenService := service.NewTokenService("test-secret", time.Hour)
+	userID := bson.NewObjectID()
+	token, err := tokenService.CreateAccessToken(userID)
+	if err != nil {
+		t.Fatalf("CreateAccessToken returned error: %v", err)
+	}
+	authHandler := NewAuthHandler(&fakeAuthService{user: &domain.User{
+		ID: userID,
+		Profile: domain.UserProfile{
+			Username:               "用户8000",
+			AvatarObjectKey:        "users/user_1/profile/avatar/source.png",
+			AvatarDisplayObjectKey: "users/user_1/profile/avatar/display.jpg",
+		},
+		Status: domain.UserStatusCreated,
+	}}, fakeObjectURLSigner{})
+	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
+	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	var resp struct {
+		Profile struct {
+			AvatarURL       string `json:"avatar_url"`
+			AvatarSourceURL string `json:"avatar_source_url"`
+		} `json:"profile"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Profile.AvatarURL != "https://signed.example/users/user_1/profile/avatar/display.jpg?Expires=3600&Signature=test" {
+		t.Fatalf("unexpected avatar_url: %s", resp.Profile.AvatarURL)
+	}
+	if resp.Profile.AvatarSourceURL != "https://signed.example/users/user_1/profile/avatar/source.png?Expires=3600&Signature=test" {
+		t.Fatalf("unexpected avatar_source_url: %s", resp.Profile.AvatarSourceURL)
+	}
+}
+
+func TestMeHandlerNormalizesLegacyDefaultAvatarURL(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	tokenService := service.NewTokenService("test-secret", time.Hour)
+	userID := bson.NewObjectID()
+	token, err := tokenService.CreateAccessToken(userID)
+	if err != nil {
+		t.Fatalf("CreateAccessToken returned error: %v", err)
+	}
+	authHandler := NewAuthHandler(&fakeAuthService{user: &domain.User{
+		ID: userID,
+		Profile: domain.UserProfile{
+			Username:        "用户8000",
+			AvatarObjectKey: "users/default/profile/avatar/source.jpg",
+		},
+		Status: domain.UserStatusCreated,
+	}}, fakeObjectURLSigner{})
+	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
+	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	var resp struct {
+		Profile struct {
+			AvatarURL       string `json:"avatar_url"`
+			AvatarSourceURL string `json:"avatar_source_url"`
+		} `json:"profile"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	expectedAvatarURL := "https://signed.example/users/default/avatar.png?Expires=3600&Signature=test"
+	if resp.Profile.AvatarURL != expectedAvatarURL || resp.Profile.AvatarSourceURL != expectedAvatarURL {
+		t.Fatalf("unexpected avatar response: %+v", resp.Profile)
+	}
+}
+
 func TestDeleteMeHandlerReturnsDeleted(t *testing.T) {
 	t.Parallel()
 
@@ -269,7 +366,7 @@ func TestDeleteMeHandlerReturnsDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAccessToken returned error: %v", err)
 	}
-	authService := &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}}
+	authService := &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "users/default/avatar.png"}, Status: domain.UserStatusCreated}}
 	authHandler := NewAuthHandler(authService, fakeObjectURLSigner{})
 	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
 	router.DELETE("/api/v1/auth/me", authMiddleware.RequireAuth(), authHandler.DeleteMe)
@@ -301,7 +398,7 @@ func TestUpdateMyProfileHandlerReturnsUpdatedUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAccessToken returned error: %v", err)
 	}
-	authHandler := NewAuthHandler(&fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "旧用户名", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}}, fakeObjectURLSigner{})
+	authHandler := NewAuthHandler(&fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "旧用户名", AvatarObjectKey: "users/default/avatar.png"}, Status: domain.UserStatusCreated}}, fakeObjectURLSigner{})
 	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
 	router.PUT("/api/v1/me/profile", authMiddleware.RequireAuth(), authHandler.UpdateMyProfile)
 

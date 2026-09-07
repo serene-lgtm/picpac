@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"strings"
 	"testing"
@@ -191,8 +194,9 @@ type recordingSMSService struct {
 }
 
 type fakeAuthUploadService struct {
-	objectKey string
-	err       error
+	objectKey  string
+	objectKeys []string
+	err        error
 }
 
 func (s *fakeAuthUploadService) Upload(_ context.Context, objectKey string, _ string, _ io.Reader) error {
@@ -200,11 +204,18 @@ func (s *fakeAuthUploadService) Upload(_ context.Context, objectKey string, _ st
 		return s.err
 	}
 	s.objectKey = objectKey
+	s.objectKeys = append(s.objectKeys, objectKey)
 	return nil
 }
 
 func testImageReader() *bytes.Reader {
-	return bytes.NewReader([]byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00})
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var body bytes.Buffer
+	if err := png.Encode(&body, img); err != nil {
+		panic(err)
+	}
+	return bytes.NewReader(body.Bytes())
 }
 
 func (s *recordingSMSService) SendLoginCode(_ context.Context, phone string, code string) error {
@@ -575,8 +586,10 @@ func TestUpdateMyProfileUpdatesUser(t *testing.T) {
 	if users.updated == nil {
 		t.Fatalf("expected user to be updated")
 	}
-	expectedAvatarObjectKey := "user-avatar/user_" + userID.Hex() + ".png"
-	if user.Profile.Username != "新用户" || user.Profile.Gender != domain.UserGenderFemale || user.Profile.AvatarObjectKey != expectedAvatarObjectKey {
+	expectedAvatarObjectKey := "users/user_" + userID.Hex() + "/profile/avatar/source.png"
+	expectedAvatarDisplayObjectKey := "users/user_" + userID.Hex() + "/profile/avatar/display.jpg"
+	if user.Profile.Username != "新用户" || user.Profile.Gender != domain.UserGenderFemale ||
+		user.Profile.AvatarObjectKey != expectedAvatarObjectKey || user.Profile.AvatarDisplayObjectKey != expectedAvatarDisplayObjectKey {
 		t.Fatalf("unexpected updated user: %+v", user.Profile)
 	}
 	if user.Profile.Birthday == nil || user.Profile.Birthday.Format("2006-01-02") != "1998-08-20" {

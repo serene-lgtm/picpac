@@ -16,17 +16,25 @@ import (
 const itemCollectionName = "items"
 
 type itemDocument struct {
-	ID                       bson.ObjectID     `json:"id" bson:"_id,omitempty"`
-	UserID                   bson.ObjectID     `json:"user_id" bson:"uid"`
-	CategoryID               bson.ObjectID     `json:"category_id" bson:"cid"`
-	Name                     string            `json:"name" bson:"nm"`
-	Description              string            `json:"description" bson:"desc"`
-	SourceImageObjectKey     string            `json:"source_image_object_key" bson:"siok"`
-	ImageThumbnailObjectKey  string            `json:"image_thumbnail_object_key" bson:"itok"`
-	AIRenderedImageObjectKey string            `json:"ai_rendered_image_object_key" bson:"aiok"`
-	Status                   domain.ItemStatus `json:"status" bson:"st"`
-	CreatedAt                time.Time         `json:"created_at" bson:"cat"`
-	UpdatedAt                time.Time         `json:"updated_at" bson:"uat"`
+	ID                       bson.ObjectID       `json:"id" bson:"_id,omitempty"`
+	UserID                   bson.ObjectID       `json:"user_id" bson:"uid"`
+	CategoryID               bson.ObjectID       `json:"category_id" bson:"cid"`
+	Name                     string              `json:"name" bson:"nm"`
+	Description              string              `json:"description" bson:"desc"`
+	Photos                   []itemPhotoDocument `json:"photos" bson:"ph"`
+	SourceImageObjectKey     string              `json:"source_image_object_key" bson:"siok,omitempty"`
+	ImageThumbnailObjectKey  string              `json:"image_thumbnail_object_key" bson:"itok,omitempty"`
+	AIRenderedImageObjectKey string              `json:"ai_rendered_image_object_key" bson:"aiok,omitempty"`
+	Status                   domain.ItemStatus   `json:"status" bson:"st"`
+	CreatedAt                time.Time           `json:"created_at" bson:"cat"`
+	UpdatedAt                time.Time           `json:"updated_at" bson:"uat"`
+}
+
+type itemPhotoDocument struct {
+	ID               bson.ObjectID `json:"id" bson:"_id"`
+	SourceObjectKey  string        `json:"source_object_key" bson:"sok"`
+	DisplayObjectKey string        `json:"display_object_key" bson:"dok"`
+	CreatedAt        time.Time     `json:"created_at" bson:"cat"`
 }
 
 // ItemRepository stores item domain models in MongoDB.
@@ -223,34 +231,78 @@ func (r *ItemRepository) find(ctx context.Context, filter bson.M) ([]itemDocumen
 
 func newItemDocument(item *domain.Item) itemDocument {
 	return itemDocument{
-		ID:                       item.ID,
-		UserID:                   item.UserID,
-		CategoryID:               item.CategoryID,
-		Name:                     item.Name,
-		Description:              item.Description,
-		SourceImageObjectKey:     item.SourceImageObjectKey,
-		ImageThumbnailObjectKey:  item.ImageThumbnailObjectKey,
-		AIRenderedImageObjectKey: item.AIRenderedImageObjectKey,
-		Status:                   item.Status,
-		CreatedAt:                item.CreatedAt,
-		UpdatedAt:                item.UpdatedAt,
+		ID:          item.ID,
+		UserID:      item.UserID,
+		CategoryID:  item.CategoryID,
+		Name:        item.Name,
+		Description: item.Description,
+		Photos:      newItemPhotoDocuments(item.Photos),
+		Status:      item.Status,
+		CreatedAt:   item.CreatedAt,
+		UpdatedAt:   item.UpdatedAt,
 	}
 }
 
 func newDomainItem(doc itemDocument) domain.Item {
 	return domain.Item{
-		ID:                       doc.ID,
-		UserID:                   doc.UserID,
-		CategoryID:               doc.CategoryID,
-		Name:                     doc.Name,
-		Description:              doc.Description,
-		SourceImageObjectKey:     doc.SourceImageObjectKey,
-		ImageThumbnailObjectKey:  doc.ImageThumbnailObjectKey,
-		AIRenderedImageObjectKey: doc.AIRenderedImageObjectKey,
-		Status:                   doc.Status,
-		CreatedAt:                doc.CreatedAt,
-		UpdatedAt:                doc.UpdatedAt,
+		ID:          doc.ID,
+		UserID:      doc.UserID,
+		CategoryID:  doc.CategoryID,
+		Name:        doc.Name,
+		Description: doc.Description,
+		Photos:      newDomainItemPhotos(doc),
+		Status:      doc.Status,
+		CreatedAt:   doc.CreatedAt,
+		UpdatedAt:   doc.UpdatedAt,
 	}
+}
+
+func newItemPhotoDocuments(photos []domain.ItemPhoto) []itemPhotoDocument {
+	if len(photos) == 0 {
+		return nil
+	}
+
+	docs := make([]itemPhotoDocument, 0, len(photos))
+	for _, photo := range photos {
+		docs = append(docs, itemPhotoDocument{
+			ID:               photo.ID,
+			SourceObjectKey:  photo.SourceObjectKey,
+			DisplayObjectKey: photo.DisplayObjectKey,
+			CreatedAt:        photo.CreatedAt,
+		})
+	}
+
+	return docs
+}
+
+func newDomainItemPhotos(doc itemDocument) []domain.ItemPhoto {
+	if len(doc.Photos) > 0 {
+		photos := make([]domain.ItemPhoto, 0, len(doc.Photos))
+		for _, photoDoc := range doc.Photos {
+			photos = append(photos, domain.ItemPhoto{
+				ID:               photoDoc.ID,
+				SourceObjectKey:  photoDoc.SourceObjectKey,
+				DisplayObjectKey: photoDoc.DisplayObjectKey,
+				CreatedAt:        photoDoc.CreatedAt,
+			})
+		}
+		return photos
+	}
+
+	if doc.SourceImageObjectKey == "" {
+		return nil
+	}
+
+	displayObjectKey := doc.SourceImageObjectKey
+	if doc.AIRenderedImageObjectKey != "" {
+		displayObjectKey = doc.AIRenderedImageObjectKey
+	}
+	return []domain.ItemPhoto{{
+		ID:               doc.ID,
+		SourceObjectKey:  doc.SourceImageObjectKey,
+		DisplayObjectKey: displayObjectKey,
+		CreatedAt:        doc.CreatedAt,
+	}}
 }
 
 func newDomainItems(docs []itemDocument) []domain.Item {

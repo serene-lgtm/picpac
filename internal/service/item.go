@@ -49,6 +49,7 @@ func NewItemService(repo repository.ItemRepository, uploader UploadService, cate
 }
 
 const maxBatchCreateItemsCount = 50
+const maxItemPhotosCount = 6
 
 // CreateItem creates a new item.
 func (s *itemService) CreateItem(ctx context.Context, input request.CreateItemInput) (*domain.Item, error) {
@@ -68,25 +69,22 @@ func (s *itemService) CreateItem(ctx context.Context, input request.CreateItemIn
 
 	now := time.Now().UTC()
 	item := &domain.Item{
-		ID:                       bson.NewObjectID(),
-		UserID:                   userID,
-		CategoryID:               categoryID,
-		Name:                     name,
-		Description:              strings.TrimSpace(input.Description),
-		SourceImageObjectKey:     "",
-		ImageThumbnailObjectKey:  "",
-		AIRenderedImageObjectKey: "",
-		Status:                   domain.ItemStatusCreated,
-		CreatedAt:                now,
-		UpdatedAt:                now,
+		ID:          bson.NewObjectID(),
+		UserID:      userID,
+		CategoryID:  categoryID,
+		Name:        name,
+		Description: strings.TrimSpace(input.Description),
+		Status:      domain.ItemStatusCreated,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
-	if input.File != nil {
-		objectKey, err := s.uploadItemImage(ctx, item.ID, input.FileName, input.File)
+	if len(input.Photos) > 0 {
+		photos, err := s.uploadItemPhotos(ctx, userID, item.ID, input.Photos)
 		if err != nil {
 			return nil, err
 		}
-		item.SourceImageObjectKey = objectKey
+		item.Photos = photos
 	}
 
 	if err := s.repo.Create(ctx, item); err != nil {
@@ -122,17 +120,14 @@ func (s *itemService) CreateItemsBatch(ctx context.Context, input request.BatchC
 			return nil, err
 		}
 		items = append(items, domain.Item{
-			ID:                       bson.NewObjectID(),
-			UserID:                   userID,
-			CategoryID:               categoryID,
-			Name:                     name,
-			Description:              strings.TrimSpace(itemInput.Description),
-			SourceImageObjectKey:     "",
-			ImageThumbnailObjectKey:  "",
-			AIRenderedImageObjectKey: "",
-			Status:                   domain.ItemStatusCreated,
-			CreatedAt:                now,
-			UpdatedAt:                now,
+			ID:          bson.NewObjectID(),
+			UserID:      userID,
+			CategoryID:  categoryID,
+			Name:        name,
+			Description: strings.TrimSpace(itemInput.Description),
+			Status:      domain.ItemStatusCreated,
+			CreatedAt:   now,
+			UpdatedAt:   now,
 		})
 	}
 
@@ -212,12 +207,12 @@ func (s *itemService) UpdateItem(ctx context.Context, itemID string, userID stri
 	}
 	item.UpdatedAt = time.Now().UTC()
 
-	if input.File != nil {
-		objectKey, err := s.uploadItemImage(ctx, item.ID, input.FileName, input.File)
+	if input.HasPhotos {
+		photos, err := s.uploadItemPhotos(ctx, item.UserID, item.ID, input.Photos)
 		if err != nil {
 			return nil, err
 		}
-		item.SourceImageObjectKey = objectKey
+		item.Photos = photos
 	}
 
 	if err := s.repo.Update(ctx, item); err != nil {
@@ -292,18 +287,54 @@ func (s *itemService) getOwnedItem(ctx context.Context, itemID string, userID st
 	return item, nil
 }
 
-func (s *itemService) uploadItemImage(ctx context.Context, itemID bson.ObjectID, fileName string, file io.ReadSeeker) (string, error) {
+func (s *itemService) uploadItemPhotos(ctx context.Context, userID bson.ObjectID, itemID bson.ObjectID, uploads []request.ItemPhotoUploadInput) ([]domain.ItemPhoto, error) {
+	if len(uploads) > maxItemPhotosCount {
+		return nil, fmt.Errorf("item photos are too many")
+	}
+
+	photos := make([]domain.ItemPhoto, 0, len(uploads))
+	now := time.Now().UTC()
+	for _, upload := range uploads {
+		if upload.File == nil {
+			continue
+		}
+
+		photoID := bson.NewObjectID()
+		sourceObjectKey, displayObjectKey, err := s.uploadItemPhoto(ctx, userID, itemID, photoID, upload.FileName, upload.File)
+		if err != nil {
+			return nil, err
+		}
+		photos = append(photos, domain.ItemPhoto{
+			ID:               photoID,
+			SourceObjectKey:  sourceObjectKey,
+			DisplayObjectKey: displayObjectKey,
+			CreatedAt:        now,
+		})
+	}
+
+	return photos, nil
+}
+
+func (s *itemService) uploadItemPhoto(ctx context.Context, userID bson.ObjectID, itemID bson.ObjectID, photoID bson.ObjectID, fileName string, file io.ReadSeeker) (string, string, error) {
 	body, contentType, err := readUpload(file)
 	if err != nil {
-		return "", fmt.Errorf("invalid input")
+		return "", "", fmt.Errorf("invalid input")
+	}
+	displayBody, displayContentType, err := buildDisplayImage(body)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid input")
 	}
 
-	objectKey := buildItemObjectKey(itemID, fileName, contentType)
+	objectKey := buildItemPhotoObjectKey(userID, itemID, photoID, fileName, contentType)
 	if err := s.uploader.Upload(ctx, objectKey, contentType, bytes.NewReader(body)); err != nil {
-		return "", fmt.Errorf("upload item image failed: %w", err)
+		return "", "", fmt.Errorf("upload item image failed: %w", err)
+	}
+	displayObjectKey := buildItemPhotoDisplayObjectKey(userID, itemID, photoID)
+	if err := s.uploader.Upload(ctx, displayObjectKey, displayContentType, bytes.NewReader(displayBody)); err != nil {
+		return "", "", fmt.Errorf("upload item image failed: %w", err)
 	}
 
-	return objectKey, nil
+	return objectKey, displayObjectKey, nil
 }
 
 func parseObjectID(value string) (bson.ObjectID, error) {
@@ -348,9 +379,13 @@ func readUpload(file io.ReadSeeker) ([]byte, string, error) {
 	return body, contentType, nil
 }
 
-func buildItemObjectKey(itemID bson.ObjectID, fileName string, contentType string) string {
+func buildItemPhotoObjectKey(userID bson.ObjectID, itemID bson.ObjectID, photoID bson.ObjectID, fileName string, contentType string) string {
 	ext := extensionForUpload(fileName, contentType)
-	return fmt.Sprintf("items/item_%s/source%s", itemID.Hex(), ext)
+	return fmt.Sprintf("items/user_%s/item_%s/photos/photo_%s/source%s", userID.Hex(), itemID.Hex(), photoID.Hex(), ext)
+}
+
+func buildItemPhotoDisplayObjectKey(userID bson.ObjectID, itemID bson.ObjectID, photoID bson.ObjectID) string {
+	return fmt.Sprintf("items/user_%s/item_%s/photos/photo_%s/display.jpg", userID.Hex(), itemID.Hex(), photoID.Hex())
 }
 
 func extensionForUpload(fileName string, contentType string) string {

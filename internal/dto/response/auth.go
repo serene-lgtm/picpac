@@ -26,10 +26,11 @@ type UserResponse struct {
 
 // UserProfileResponse defines the API response for a user profile.
 type UserProfileResponse struct {
-	Username  string `json:"username"`
-	Gender    string `json:"gender"`
-	Birthday  string `json:"birthday"`
-	AvatarURL string `json:"avatar_url"`
+	Username        string `json:"username"`
+	Gender          string `json:"gender"`
+	Birthday        string `json:"birthday"`
+	AvatarURL       string `json:"avatar_url"`
+	AvatarSourceURL string `json:"avatar_source_url"`
 }
 
 // LogoutResponse defines the API response for logout.

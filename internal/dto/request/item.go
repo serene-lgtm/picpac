@@ -2,14 +2,19 @@ package request
 
 import "io"
 
+// ItemPhotoUploadInput defines one uploaded item photo.
+type ItemPhotoUploadInput struct {
+	File     io.ReadSeeker
+	FileName string
+}
+
 // CreateItemInput defines the service input for creating an item.
 type CreateItemInput struct {
 	UserID      string
 	CategoryID  string
 	Name        string
 	Description string
-	File        io.ReadSeeker
-	FileName    string
+	Photos      []ItemPhotoUploadInput
 }
 
 // BatchCreateItemInput defines one item in a batch create request.
@@ -40,6 +45,6 @@ type UpdateItemInput struct {
 	HasCategoryID bool
 	Name          string
 	Description   string
-	File          io.ReadSeeker
-	FileName      string
+	Photos        []ItemPhotoUploadInput
+	HasPhotos     bool
 }

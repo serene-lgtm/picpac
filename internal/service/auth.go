@@ -30,8 +30,7 @@ type AuthResult struct {
 	User         *domain.User
 }
 
-const userAvatarObjectPrefix = "user-avatar"
-const defaultUserAvatarObjectKey = "user-avatar/default.jpg"
+const defaultUserAvatarObjectKey = "users/default/avatar.png"
 
 // RefreshResult contains a refreshed access token.
 type RefreshResult struct {
@@ -266,8 +265,9 @@ func (s *authService) UpdateMyProfile(ctx context.Context, userID string, input 
 	}
 
 	avatarObjectKey := strings.TrimSpace(user.Profile.AvatarObjectKey)
+	avatarDisplayObjectKey := strings.TrimSpace(user.Profile.AvatarDisplayObjectKey)
 	if input.File != nil {
-		avatarObjectKey, err = s.uploadUserAvatar(ctx, user.ID, input.FileName, input.File)
+		avatarObjectKey, avatarDisplayObjectKey, err = s.uploadUserAvatar(ctx, user.ID, input.FileName, input.File)
 		if err != nil {
 			return nil, err
 		}
@@ -275,11 +275,15 @@ func (s *authService) UpdateMyProfile(ctx context.Context, userID string, input 
 	if avatarObjectKey == "" {
 		return nil, fmt.Errorf("avatar is required")
 	}
+	if avatarDisplayObjectKey == "" {
+		avatarDisplayObjectKey = avatarObjectKey
+	}
 
 	user.Profile.Username = username
 	user.Profile.Gender = gender
 	user.Profile.Birthday = birthday
 	user.Profile.AvatarObjectKey = avatarObjectKey
+	user.Profile.AvatarDisplayObjectKey = avatarDisplayObjectKey
 	user.UpdatedAt = time.Now().UTC()
 
 	if err := s.users.Update(ctx, user); err != nil {
@@ -523,21 +527,33 @@ func digitsOnly(value string) string {
 	return builder.String()
 }
 
-func (s *authService) uploadUserAvatar(ctx context.Context, userID bson.ObjectID, fileName string, file io.ReadSeeker) (string, error) {
+func (s *authService) uploadUserAvatar(ctx context.Context, userID bson.ObjectID, fileName string, file io.ReadSeeker) (string, string, error) {
 	body, contentType, err := readUpload(file)
 	if err != nil {
-		return "", fmt.Errorf("invalid input")
+		return "", "", fmt.Errorf("invalid input")
+	}
+	displayBody, displayContentType, err := buildDisplayImage(body)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid input")
 	}
 
 	objectKey := buildUserAvatarObjectKey(userID, fileName, contentType)
 	if err := s.uploader.Upload(ctx, objectKey, contentType, bytes.NewReader(body)); err != nil {
-		return "", fmt.Errorf("upload user avatar failed: %w", err)
+		return "", "", fmt.Errorf("upload user avatar failed: %w", err)
+	}
+	displayObjectKey := buildUserAvatarDisplayObjectKey(userID)
+	if err := s.uploader.Upload(ctx, displayObjectKey, displayContentType, bytes.NewReader(displayBody)); err != nil {
+		return "", "", fmt.Errorf("upload user avatar failed: %w", err)
 	}
 
-	return objectKey, nil
+	return objectKey, displayObjectKey, nil
 }
 
 func buildUserAvatarObjectKey(userID bson.ObjectID, fileName string, contentType string) string {
 	ext := extensionForUpload(fileName, contentType)
-	return fmt.Sprintf("%s/user_%s%s", userAvatarObjectPrefix, userID.Hex(), ext)
+	return fmt.Sprintf("users/user_%s/profile/avatar/source%s", userID.Hex(), ext)
+}
+
+func buildUserAvatarDisplayObjectKey(userID bson.ObjectID) string {
+	return fmt.Sprintf("users/user_%s/profile/avatar/display.jpg", userID.Hex())
 }

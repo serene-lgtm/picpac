@@ -16,9 +16,26 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - API 风格：RESTful
 
 图片 URL 约定：
-- 接口响应中的 `avatar_url`、`source_image_url`、`image_thumbnail_url`、`ai_rendered_image_url` 是临时 signed URL，会过期。
+- 接口响应中的 `avatar_url`、`cover_image_url`、`photos[].source_image_url`、`photos[].image_url` 是临时 signed URL，会过期。
+- 用户上传头像的 `avatar_url` 指向后端生成的 display 图，`avatar_source_url` 指向上传原图；默认头像不区分 source/display，两个字段返回同一个默认头像 URL。
+- `photos[].image_url` 指向后端生成的 display 图；`photos[].source_image_url` 指向上传原图。
+- 当前上传图片支持 JPEG、PNG、GIF；display 图统一生成为 JPEG。
 - 前端不应长期持久化这些 URL；如果图片访问过期，应重新请求相关列表/详情/用户接口获取新 URL。
 - 后端持久化 OSS object key，不把带 `Expires`、`OSSAccessKeyId`、`Signature` 的 URL 写入 MongoDB。
+
+OSS object key 约定：
+- 默认头像：`users/default/avatar.png`
+- 用户头像：`users/user_{user_id}/profile/avatar/source.<ext>`
+- 用户头像展示图：`users/user_{user_id}/profile/avatar/display.jpg`
+- 默认 Item cover：`items/default/cover.jpg`
+- Item 照片：`items/user_{user_id}/item_{item_id}/photos/photo_{photo_id}/source.<ext>`
+- Item 照片展示图：`items/user_{user_id}/item_{item_id}/photos/photo_{photo_id}/display.jpg`
+
+系统默认图片：
+- User default avatar 需要预先上传到 OSS：`users/default/avatar.png`
+- Item default cover 需要预先上传到 OSS：`items/default/cover.jpg`
+- 默认头像不区分 source/display；当用户未上传头像时，`avatar_url` 和 `avatar_source_url` 都会返回该默认头像的 signed URL。
+- 默认 item cover 不写入 item 的 `photos`；当 item 没有照片时，`cover_image_url` 会返回该默认 cover 的 signed URL，`photos` 仍返回空数组。
 
 ## Formal APIs
 
@@ -95,7 +112,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
       "username": "user8613800138000",
       "gender": "",
       "birthday": "",
-      "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/user-avatar/default.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
+      "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/users/default/avatar.png?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+      "avatar_source_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/users/default/avatar.png?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
     },
     "status": "created"
   }
@@ -216,7 +234,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
     "username": "user8613800138000",
     "gender": "",
     "birthday": "",
-    "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/user-avatar/default.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
+    "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/users/default/avatar.png?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+    "avatar_source_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/users/default/avatar.png?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
   },
   "status": "created"
 }
@@ -233,8 +252,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 更新当前登录用户的 profile
-- 后端会接收头像文件并上传到阿里云 OSS，MongoDB 只保存头像 object key，不保存临时 URL
-- 如果不上传新的头像文件，会保留当前已有的头像 object key；首次登录创建的默认头像 object key 是 `user-avatar/default.jpg`
+- 后端会接收头像文件并同时上传 source 原图和 display 展示图到阿里云 OSS，MongoDB 只保存头像 object key，不保存临时 URL
+- 如果不上传新的头像文件，会保留当前已有的头像 object key；首次登录创建的默认头像 object key 是 `users/default/avatar.png`
 
 请求头：
 - `Authorization: Bearer <access_token>`
@@ -263,7 +282,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
     "username": "packmate_user",
     "gender": "female",
     "birthday": "1998-08-20",
-    "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/user-avatar/user_6821c0c1f1b2f4d5a6b7c8d1.png?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
+    "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/users/user_6821c0c1f1b2f4d5a6b7c8d1/profile/avatar/display.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+    "avatar_source_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/users/user_6821c0c1f1b2f4d5a6b7c8d1/profile/avatar/source.png?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
   },
   "status": "created"
 }
@@ -313,7 +333,11 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 
 用途：
 - 创建一个用户私有的 item
-- 如果上传图片，后端会先上传到阿里云 OSS，MongoDB 只保存图片 object key，不保存临时 URL
+- 如果上传照片，后端会先上传到阿里云 OSS，MongoDB 只保存图片 object key，不保存临时 URL
+- 每张上传照片都会保存 source 原图，并自动生成一张 display 展示图
+- 当前最多支持 6 张照片，照片顺序按 multipart 中的上传顺序保存
+- 第一张照片会作为 item tile 的 cover；`cover_image_url` 等于 `photos[0].image_url`
+- 如果没有上传照片，`cover_image_url` 会返回默认 item cover 的 signed URL，`photos` 仍为空数组
 - 新创建的 item 会默认写入 `created` 状态
 - `user_id` 从当前登录用户读取，不接受前端显式传入
 
@@ -325,7 +349,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `name`: string，必填
 - `description`: string，可选
 - `category_id`: string，可选；不传或传空字符串时后端使用 `key=other` 的 category
-- `image`: 文件，可选
+- `photos`: 文件数组，可选，最多 6 张
+- `image`: 文件，可选，旧单图字段；如果同时传 `photos` 和 `image`，以后端读取到的 `photos` 为准
 
 成功响应：
 
@@ -338,15 +363,20 @@ picpac 是一个个人物品管理手机 app 的后端服务。
   "category_name": "证件",
   "name": "黑色双肩包",
   "description": "日常出差用",
-  "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
-  "image_thumbnail_url": "",
-  "ai_rendered_image_url": "",
+  "cover_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e0/display.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+  "photos": [
+    {
+      "id": "6821c0c1f1b2f4d5a6b7c8e0",
+      "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e0/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+      "image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e0/display.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
+    }
+  ],
   "status": "created"
 }
 ```
 
 失败响应：
-- `400`: 缺少 `name`，`category_id` 非法/不存在，或上传文件不是有效图片
+- `400`: 缺少 `name`，`category_id` 非法/不存在，照片超过 6 张，或上传文件不是有效图片
 - `401`: access token 缺失、非法或过期
 - `502`: 图片上传失败
 - `500`: 创建 item、查询默认 category 或生成图片访问 URL 失败
@@ -405,9 +435,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
       "category_name": "电子设备",
       "name": "手机",
       "description": "主力机",
-      "source_image_url": "",
-      "image_thumbnail_url": "",
-      "ai_rendered_image_url": "",
+      "cover_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/default/cover.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+      "photos": [],
       "status": "created"
     }
   ]
@@ -467,9 +496,14 @@ picpac 是一个个人物品管理手机 app 的后端服务。
       "category_name": "电子设备",
       "name": "黑色双肩包",
       "description": "日常出差用",
-      "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
-      "image_thumbnail_url": "",
-      "ai_rendered_image_url": "",
+      "cover_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e0/display.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+      "photos": [
+        {
+          "id": "6821c0c1f1b2f4d5a6b7c8e0",
+          "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e0/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+          "image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e0/display.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
+        }
+      ],
       "status": "created"
     }
   ]
@@ -515,9 +549,14 @@ picpac 是一个个人物品管理手机 app 的后端服务。
   "category_name": "电子设备",
   "name": "黑色双肩包",
   "description": "日常出差用",
-  "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
-  "image_thumbnail_url": "",
-  "ai_rendered_image_url": "",
+  "cover_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e0/display.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+  "photos": [
+    {
+      "id": "6821c0c1f1b2f4d5a6b7c8e0",
+      "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e0/source.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+      "image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e0/display.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
+    }
+  ],
   "status": "created"
 }
 ```
@@ -533,9 +572,12 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 `PUT /api/v1/item/:item_id`
 
 用途：
-- 更新单个 item 的名称、描述和可选图片
+- 更新单个 item 的名称、描述、category 和可选照片
 - 只允许更新当前登录用户自己的 item
-- 如果上传新图片，会覆盖后端保存的 source image object key；响应里的 `source_image_url` 会返回新的临时 signed URL
+- 如果上传 `photos` 或旧字段 `image`，会整体替换该 item 的照片列表
+- 如果不上传照片字段，则保留原照片列表
+- 当前最多支持 6 张照片，第一张照片会作为 item tile 的 cover
+- 如果 item 没有照片，`cover_image_url` 会返回默认 item cover 的 signed URL，`photos` 仍为空数组
 - 如果 item 已被逻辑删除，则不允许更新
 
 请求类型：
@@ -551,7 +593,8 @@ picpac 是一个个人物品管理手机 app 的后端服务。
 - `name`: string，必填
 - `description`: string，可选
 - `category_id`: string，可选；不传时保留原 category，传空字符串时后端使用 `key=other` 的 category
-- `image`: 文件，可选
+- `photos`: 文件数组，可选，最多 6 张；传入时整体替换原照片列表
+- `image`: 文件，可选，旧单图字段；如果同时传 `photos` 和 `image`，以后端读取到的 `photos` 为准
 
 成功响应：
 
@@ -564,15 +607,20 @@ picpac 是一个个人物品管理手机 app 的后端服务。
   "category_name": "电子设备",
   "name": "黑色双肩包升级版",
   "description": "更新后的描述",
-  "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/item_6821c0c1f1b2f4d5a6b7c8d9/source.png?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
-  "image_thumbnail_url": "",
-  "ai_rendered_image_url": "",
+  "cover_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e1/display.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+  "photos": [
+    {
+      "id": "6821c0c1f1b2f4d5a6b7c8e1",
+      "source_image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e1/source.png?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+      "image_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/items/user_6821c0c1f1b2f4d5a6b7c8d1/item_6821c0c1f1b2f4d5a6b7c8d9/photos/photo_6821c0c1f1b2f4d5a6b7c8e1/display.jpg?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
+    }
+  ],
   "status": "created"
 }
 ```
 
 失败响应：
-- `400`: 缺少 `name`，`item_id` 非法，`category_id` 非法/不存在，或上传文件不是有效图片
+- `400`: 缺少 `name`，`item_id` 非法，`category_id` 非法/不存在，照片超过 6 张，或上传文件不是有效图片
 - `401`: access token 缺失、非法或过期
 - `404`: item 不存在
 - `502`: 图片上传失败

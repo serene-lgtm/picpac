@@ -54,7 +54,7 @@ func newAuthenticatedAIRouter(t *testing.T, aiService *fakeAISuggestionHandlerSe
 	if err != nil {
 		t.Fatalf("CreateAccessToken returned error: %v", err)
 	}
-	authMiddleware := NewAuthMiddleware(tokenService, &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}})
+	authMiddleware := NewAuthMiddleware(tokenService, &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "users/default/avatar.png"}, Status: domain.UserStatusCreated}})
 	aiRoutes := router.Group("/api/v1/ai")
 	aiRoutes.Use(authMiddleware.RequireAuth())
 	aiRoutes.POST("/item-drafts", aiHandler.GenerateItemDrafts)

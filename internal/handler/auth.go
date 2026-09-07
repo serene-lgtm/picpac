@@ -15,6 +15,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	defaultUserAvatarObjectKey         = "users/default/avatar.png"
+	legacyDefaultUserAvatarObjectKey   = "users/default/profile/avatar/source.jpg"
+	previousDefaultUserAvatarObjectKey = "users/default/profile/avatar.jpg"
+)
+
 // AuthHandler handles auth HTTP requests.
 type AuthHandler struct {
 	svc       service.AuthService
@@ -259,7 +265,15 @@ func (h *AuthHandler) buildAuthResponse(ctx context.Context, result *service.Aut
 }
 
 func (h *AuthHandler) buildUserResponse(ctx context.Context, user *domain.User) (response.UserResponse, error) {
-	avatarURL, err := h.signAvatarURL(ctx, user.Profile.AvatarObjectKey)
+	avatarSourceURL, err := h.signAvatarURL(ctx, user.Profile.AvatarObjectKey)
+	if err != nil {
+		return response.UserResponse{}, err
+	}
+	avatarObjectKey := strings.TrimSpace(user.Profile.AvatarDisplayObjectKey)
+	if avatarObjectKey == "" {
+		avatarObjectKey = user.Profile.AvatarObjectKey
+	}
+	avatarURL, err := h.signAvatarURL(ctx, avatarObjectKey)
 	if err != nil {
 		return response.UserResponse{}, err
 	}
@@ -267,10 +281,11 @@ func (h *AuthHandler) buildUserResponse(ctx context.Context, user *domain.User) 
 	return response.UserResponse{
 		ID: user.ID.Hex(),
 		Profile: response.UserProfileResponse{
-			Username:  user.Profile.Username,
-			Gender:    string(user.Profile.Gender),
-			Birthday:  formatUserBirthday(user.Profile.Birthday),
-			AvatarURL: avatarURL,
+			Username:        user.Profile.Username,
+			Gender:          string(user.Profile.Gender),
+			Birthday:        formatUserBirthday(user.Profile.Birthday),
+			AvatarURL:       avatarURL,
+			AvatarSourceURL: avatarSourceURL,
 		},
 		Status: string(user.Status),
 	}, nil
@@ -281,6 +296,7 @@ func (h *AuthHandler) signAvatarURL(ctx context.Context, objectKey string) (stri
 	if objectKey == "" {
 		return "", nil
 	}
+	objectKey = normalizeAvatarObjectKey(objectKey)
 	if h.urlSigner == nil {
 		return "", fmt.Errorf("sign user avatar url failed: url signer is not configured")
 	}
@@ -291,6 +307,13 @@ func (h *AuthHandler) signAvatarURL(ctx context.Context, objectKey string) (stri
 	}
 
 	return signedURL, nil
+}
+
+func normalizeAvatarObjectKey(objectKey string) string {
+	if objectKey == legacyDefaultUserAvatarObjectKey || objectKey == previousDefaultUserAvatarObjectKey {
+		return defaultUserAvatarObjectKey
+	}
+	return objectKey
 }
 
 func formatUserBirthday(value *time.Time) string {

@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"strings"
 
@@ -13,6 +15,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const defaultItemCoverObjectKey = "items/default/cover.jpg"
 
 // ItemHandler handles item HTTP requests.
 type ItemHandler struct {
@@ -49,8 +53,17 @@ func (h *ItemHandler) CreateItem(c *gin.Context) {
 	}
 	if file, header, err := c.Request.FormFile("image"); err == nil {
 		defer file.Close()
-		input.File = file
-		input.FileName = header.Filename
+		input.Photos = []request.ItemPhotoUploadInput{{
+			File:     file,
+			FileName: header.Filename,
+		}}
+	}
+	if photos, closePhotos, err := itemPhotoUploads(c); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+		return
+	} else if len(photos) > 0 {
+		defer closePhotos()
+		input.Photos = photos
 	}
 
 	item, err := h.svc.CreateItem(c.Request.Context(), input)
@@ -211,8 +224,19 @@ func (h *ItemHandler) UpdateItem(c *gin.Context) {
 	}
 	if file, header, err := c.Request.FormFile("image"); err == nil {
 		defer file.Close()
-		input.File = file
-		input.FileName = header.Filename
+		input.Photos = []request.ItemPhotoUploadInput{{
+			File:     file,
+			FileName: header.Filename,
+		}}
+		input.HasPhotos = true
+	}
+	if photos, closePhotos, err := itemPhotoUploads(c); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+		return
+	} else if len(photos) > 0 {
+		defer closePhotos()
+		input.Photos = photos
+		input.HasPhotos = true
 	}
 
 	item, err := h.svc.UpdateItem(c.Request.Context(), itemID, userID, input)
@@ -260,6 +284,7 @@ func respondItemError(c *gin.Context, err error) {
 		strings.Contains(message, "invalid category"),
 		strings.Contains(message, "category_id is required"),
 		strings.Contains(message, "item name is required"),
+		strings.Contains(message, "item photos are too many"),
 		strings.Contains(message, "items are required"),
 		strings.Contains(message, "items are too many"),
 		strings.Contains(message, "item search keyword is required"),
@@ -286,15 +311,7 @@ func respondItemError(c *gin.Context, err error) {
 }
 
 func (h *ItemHandler) buildItemResponse(ctx context.Context, item *domain.Item) (response.ItemResponse, error) {
-	sourceImageURL, err := h.signObjectURL(ctx, item.SourceImageObjectKey, "source image")
-	if err != nil {
-		return response.ItemResponse{}, err
-	}
-	imageThumbnailURL, err := h.signObjectURL(ctx, item.ImageThumbnailObjectKey, "image thumbnail")
-	if err != nil {
-		return response.ItemResponse{}, err
-	}
-	aiRenderedImageURL, err := h.signObjectURL(ctx, item.AIRenderedImageObjectKey, "ai rendered image")
+	photos, err := h.buildItemPhotoResponses(ctx, item.Photos)
 	if err != nil {
 		return response.ItemResponse{}, err
 	}
@@ -304,14 +321,21 @@ func (h *ItemHandler) buildItemResponse(ctx context.Context, item *domain.Item) 
 	}
 
 	itemResponse := response.ItemResponse{
-		ID:                 item.ID.Hex(),
-		UserID:             item.UserID.Hex(),
-		Name:               item.Name,
-		Description:        item.Description,
-		SourceImageURL:     sourceImageURL,
-		ImageThumbnailURL:  imageThumbnailURL,
-		AIRenderedImageURL: aiRenderedImageURL,
-		Status:             string(item.Status),
+		ID:          item.ID.Hex(),
+		UserID:      item.UserID.Hex(),
+		Name:        item.Name,
+		Description: item.Description,
+		Photos:      photos,
+		Status:      string(item.Status),
+	}
+	if len(photos) > 0 {
+		itemResponse.CoverImageURL = photos[0].ImageURL
+	} else {
+		coverImageURL, err := h.signObjectURL(ctx, defaultItemCoverObjectKey, "default cover image")
+		if err != nil {
+			return response.ItemResponse{}, err
+		}
+		itemResponse.CoverImageURL = coverImageURL
 	}
 	if category != nil {
 		itemResponse.CategoryID = category.ID.Hex()
@@ -320,6 +344,27 @@ func (h *ItemHandler) buildItemResponse(ctx context.Context, item *domain.Item) 
 	}
 
 	return itemResponse, nil
+}
+
+func (h *ItemHandler) buildItemPhotoResponses(ctx context.Context, photos []domain.ItemPhoto) ([]response.ItemPhotoResponse, error) {
+	responses := make([]response.ItemPhotoResponse, 0, len(photos))
+	for _, photo := range photos {
+		sourceImageURL, err := h.signObjectURL(ctx, photo.SourceObjectKey, "source image")
+		if err != nil {
+			return nil, err
+		}
+		imageURL, err := h.signObjectURL(ctx, photo.DisplayObjectKey, "display image")
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, response.ItemPhotoResponse{
+			ID:             photo.ID.Hex(),
+			SourceImageURL: sourceImageURL,
+			ImageURL:       imageURL,
+		})
+	}
+
+	return responses, nil
 }
 
 func (h *ItemHandler) categoryForItem(ctx context.Context, item *domain.Item) (*domain.Category, error) {
@@ -344,4 +389,39 @@ func (h *ItemHandler) signObjectURL(ctx context.Context, objectKey string, label
 	}
 
 	return signedURL, nil
+}
+
+func itemPhotoUploads(c *gin.Context) ([]request.ItemPhotoUploadInput, func(), error) {
+	form := c.Request.MultipartForm
+	if form == nil || len(form.File["photos"]) == 0 {
+		return nil, func() {}, nil
+	}
+
+	uploads := make([]request.ItemPhotoUploadInput, 0, len(form.File["photos"]))
+	files := make([]multipart.File, 0, len(form.File["photos"]))
+	for _, header := range form.File["photos"] {
+		file, err := header.Open()
+		if err != nil {
+			closeMultipartFiles(files)
+			return nil, func() {}, err
+		}
+		files = append(files, file)
+		readSeeker, ok := file.(io.ReadSeeker)
+		if !ok {
+			closeMultipartFiles(files)
+			return nil, func() {}, fmt.Errorf("invalid input")
+		}
+		uploads = append(uploads, request.ItemPhotoUploadInput{
+			File:     readSeeker,
+			FileName: header.Filename,
+		})
+	}
+
+	return uploads, func() { closeMultipartFiles(files) }, nil
+}
+
+func closeMultipartFiles(files []multipart.File) {
+	for _, file := range files {
+		_ = file.Close()
+	}
 }
