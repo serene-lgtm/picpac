@@ -22,9 +22,15 @@ import (
 )
 
 type fakeAuthService struct {
-	err           error
-	user          *domain.User
-	deletedUserID string
+	err                 error
+	passwordLoginErr    error
+	setupPasswordErr    error
+	changePasswordErr   error
+	user                *domain.User
+	deletedUserID       string
+	passwordLoginInput  request.PhonePasswordLoginInput
+	setupPasswordInput  request.SetupPasswordInput
+	changePasswordInput request.ChangePasswordInput
 }
 
 type fakeObjectURLSigner struct {
@@ -49,6 +55,14 @@ func (s *fakeAuthService) LoginWithPhone(_ context.Context, _ request.PhoneLogin
 	return &service.AuthResult{AccessToken: "access", RefreshToken: "refresh", User: s.defaultUser()}, nil
 }
 
+func (s *fakeAuthService) LoginWithPhonePassword(_ context.Context, input request.PhonePasswordLoginInput) (*service.AuthResult, error) {
+	s.passwordLoginInput = input
+	if s.passwordLoginErr != nil {
+		return nil, s.passwordLoginErr
+	}
+	return &service.AuthResult{AccessToken: "access", RefreshToken: "refresh", User: s.defaultUser()}, nil
+}
+
 func (s *fakeAuthService) Refresh(_ context.Context, _ request.RefreshTokenInput) (*service.RefreshResult, error) {
 	if s.err != nil {
 		return nil, s.err
@@ -58,6 +72,22 @@ func (s *fakeAuthService) Refresh(_ context.Context, _ request.RefreshTokenInput
 
 func (s *fakeAuthService) Logout(_ context.Context, _ request.LogoutInput) error {
 	return s.err
+}
+
+func (s *fakeAuthService) SetupPassword(_ context.Context, input request.SetupPasswordInput) error {
+	s.setupPasswordInput = input
+	if s.setupPasswordErr != nil {
+		return s.setupPasswordErr
+	}
+	return nil
+}
+
+func (s *fakeAuthService) ChangePassword(_ context.Context, input request.ChangePasswordInput) error {
+	s.changePasswordInput = input
+	if s.changePasswordErr != nil {
+		return s.changePasswordErr
+	}
+	return nil
 }
 
 func (s *fakeAuthService) Me(_ context.Context, _ string) (*domain.User, error) {
@@ -169,6 +199,70 @@ func TestLoginWithPhoneHandlerReturnsTokens(t *testing.T) {
 	}
 }
 
+func TestLoginWithPhoneCodeHandlerReturnsTokens(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	authHandler := NewAuthHandler(&fakeAuthService{}, fakeObjectURLSigner{})
+	router.POST("/api/v1/auth/phone/code/login", authHandler.LoginWithPhone)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/phone/code/login", bytes.NewBufferString(`{"phone":"13800138000","code":"123456"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `"access_token":"access"`) || !strings.Contains(recorder.Body.String(), `"refresh_token":"refresh"`) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestLoginWithPhonePasswordHandlerReturnsTokens(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	authService := &fakeAuthService{}
+	authHandler := NewAuthHandler(authService, fakeObjectURLSigner{})
+	router.POST("/api/v1/auth/phone/password/login", authHandler.LoginWithPhonePassword)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/phone/password/login", bytes.NewBufferString(`{"phone":"13800138000","password":"Trip2026Pass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if authService.passwordLoginInput.Phone != "13800138000" || authService.passwordLoginInput.Password != "Trip2026Pass" {
+		t.Fatalf("unexpected password login input: %+v", authService.passwordLoginInput)
+	}
+	if !strings.Contains(recorder.Body.String(), `"access_token":"access"`) || !strings.Contains(recorder.Body.String(), `"refresh_token":"refresh"`) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestLoginWithPhonePasswordHandlerMapsLockedPassword(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	authHandler := NewAuthHandler(&fakeAuthService{passwordLoginErr: errors.New("password is locked")}, fakeObjectURLSigner{})
+	router.POST("/api/v1/auth/phone/password/login", authHandler.LoginWithPhonePassword)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/phone/password/login", bytes.NewBufferString(`{"phone":"13800138000","password":"Trip2026Pass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestRefreshHandlerReturnsAccessTokenOnly(t *testing.T) {
 	t.Parallel()
 
@@ -194,6 +288,126 @@ func TestRefreshHandlerReturnsAccessTokenOnly(t *testing.T) {
 	}
 	if _, ok := resp["refresh_token"]; ok {
 		t.Fatalf("did not expect refresh_token in response: %+v", resp)
+	}
+}
+
+func TestSetupPasswordHandlerUsesCurrentUserID(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	tokenService := service.NewTokenService("test-secret", time.Hour)
+	userID := bson.NewObjectID()
+	token, err := tokenService.CreateAccessToken(userID)
+	if err != nil {
+		t.Fatalf("CreateAccessToken returned error: %v", err)
+	}
+	authService := &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "users/default/avatar.png"}, Status: domain.UserStatusCreated}}
+	authHandler := NewAuthHandler(authService, fakeObjectURLSigner{})
+	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
+	router.POST("/api/v1/auth/password/setup", authMiddleware.RequireAuth(), authHandler.SetupPassword)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password/setup", bytes.NewBufferString(`{"phone":"13800138000","password":"Trip2026Pass"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if authService.setupPasswordInput.UserID != userID.Hex() || authService.setupPasswordInput.Phone != "13800138000" || authService.setupPasswordInput.Password != "Trip2026Pass" {
+		t.Fatalf("unexpected setup password input: %+v", authService.setupPasswordInput)
+	}
+	if !strings.Contains(recorder.Body.String(), `"setup":true`) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestSetupPasswordHandlerMapsWeakPassword(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	tokenService := service.NewTokenService("test-secret", time.Hour)
+	userID := bson.NewObjectID()
+	token, err := tokenService.CreateAccessToken(userID)
+	if err != nil {
+		t.Fatalf("CreateAccessToken returned error: %v", err)
+	}
+	authHandler := NewAuthHandler(&fakeAuthService{setupPasswordErr: errors.New("password is too weak"), user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "users/default/avatar.png"}, Status: domain.UserStatusCreated}}, fakeObjectURLSigner{})
+	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
+	router.POST("/api/v1/auth/password/setup", authMiddleware.RequireAuth(), authHandler.SetupPassword)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password/setup", bytes.NewBufferString(`{"phone":"13800138000","password":"12345678"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestChangePasswordHandlerUsesCurrentUserID(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	tokenService := service.NewTokenService("test-secret", time.Hour)
+	userID := bson.NewObjectID()
+	token, err := tokenService.CreateAccessToken(userID)
+	if err != nil {
+		t.Fatalf("CreateAccessToken returned error: %v", err)
+	}
+	authService := &fakeAuthService{user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "users/default/avatar.png"}, Status: domain.UserStatusCreated}}
+	authHandler := NewAuthHandler(authService, fakeObjectURLSigner{})
+	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
+	router.PUT("/api/v1/auth/password", authMiddleware.RequireAuth(), authHandler.ChangePassword)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/auth/password", bytes.NewBufferString(`{"old_password":"Trip2026Pass","new_password":"NewTrip2027"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if authService.changePasswordInput.UserID != userID.Hex() ||
+		authService.changePasswordInput.OldPassword != "Trip2026Pass" ||
+		authService.changePasswordInput.NewPassword != "NewTrip2027" {
+		t.Fatalf("unexpected change password input: %+v", authService.changePasswordInput)
+	}
+	if !strings.Contains(recorder.Body.String(), `"changed":true`) {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestChangePasswordHandlerMapsInvalidPassword(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	tokenService := service.NewTokenService("test-secret", time.Hour)
+	userID := bson.NewObjectID()
+	token, err := tokenService.CreateAccessToken(userID)
+	if err != nil {
+		t.Fatalf("CreateAccessToken returned error: %v", err)
+	}
+	authHandler := NewAuthHandler(&fakeAuthService{changePasswordErr: errors.New("password is invalid"), user: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "users/default/avatar.png"}, Status: domain.UserStatusCreated}}, fakeObjectURLSigner{})
+	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
+	router.PUT("/api/v1/auth/password", authMiddleware.RequireAuth(), authHandler.ChangePassword)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/auth/password", bytes.NewBufferString(`{"old_password":"Wrong2026Pass","new_password":"NewTrip2027"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 }
 

@@ -143,11 +143,23 @@ func (s *fakeAuthService) LoginWithPhone(_ context.Context, _ request.PhoneLogin
 	return &service.AuthResult{AccessToken: "access", RefreshToken: "refresh", User: &domain.User{ID: bson.NewObjectID(), Profile: domain.UserProfile{Username: "user", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}}, nil
 }
 
+func (s *fakeAuthService) LoginWithPhonePassword(_ context.Context, _ request.PhonePasswordLoginInput) (*service.AuthResult, error) {
+	return &service.AuthResult{AccessToken: "access", RefreshToken: "refresh", User: &domain.User{ID: bson.NewObjectID(), Profile: domain.UserProfile{Username: "user", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}}, nil
+}
+
 func (s *fakeAuthService) Refresh(_ context.Context, _ request.RefreshTokenInput) (*service.RefreshResult, error) {
 	return &service.RefreshResult{AccessToken: "access"}, nil
 }
 
 func (s *fakeAuthService) Logout(_ context.Context, _ request.LogoutInput) error {
+	return nil
+}
+
+func (s *fakeAuthService) SetupPassword(_ context.Context, _ request.SetupPasswordInput) error {
+	return nil
+}
+
+func (s *fakeAuthService) ChangePassword(_ context.Context, _ request.ChangePasswordInput) error {
 	return nil
 }
 
@@ -224,8 +236,12 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		{method: http.MethodDelete, path: "/api/v1/checklist/" + bson.NewObjectID().Hex()},
 		{method: http.MethodPost, path: "/api/v1/auth/phone/code"},
 		{method: http.MethodPost, path: "/api/v1/auth/phone/login"},
+		{method: http.MethodPost, path: "/api/v1/auth/phone/code/login"},
+		{method: http.MethodPost, path: "/api/v1/auth/phone/password/login"},
 		{method: http.MethodPost, path: "/api/v1/auth/refresh"},
 		{method: http.MethodPost, path: "/api/v1/auth/logout"},
+		{method: http.MethodPost, path: "/api/v1/auth/password/setup"},
+		{method: http.MethodPut, path: "/api/v1/auth/password"},
 		{method: http.MethodDelete, path: "/api/v1/auth/me"},
 		{method: http.MethodGet, path: "/api/v1/me"},
 		{method: http.MethodPut, path: "/api/v1/me/profile"},

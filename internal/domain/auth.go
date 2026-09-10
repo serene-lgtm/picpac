@@ -56,3 +56,15 @@ type RefreshToken struct {
 	CreatedAt time.Time     `json:"created_at"`
 	UpdatedAt time.Time     `json:"updated_at"`
 }
+
+type UserPasswordCredential struct {
+	ID                 bson.ObjectID `json:"id"`
+	UserID             bson.ObjectID `json:"user_id"`
+	PasswordHash       string        `json:"password_hash"`
+	PasswordAlgo       string        `json:"password_algo"`
+	FailedAttemptCount int           `json:"failed_attempt_count"`
+	LockedUntil        *time.Time    `json:"locked_until"`
+	LastUsedAt         *time.Time    `json:"last_used_at"`
+	CreatedAt          time.Time     `json:"created_at"`
+	UpdatedAt          time.Time     `json:"updated_at"`
+}

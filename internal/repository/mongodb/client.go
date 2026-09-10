@@ -78,6 +78,13 @@ func ensureIndexes(ctx context.Context, db *mongo.Database) error {
 		return err
 	}
 
+	if _, err := db.Collection(userPasswordCredentialCollectionName).Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "uid", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		return err
+	}
+
 	if _, err := db.Collection(phoneVerificationCodeCollectionName).Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "ph", Value: 1},

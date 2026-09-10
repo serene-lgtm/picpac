@@ -38,6 +38,16 @@ type LogoutResponse struct {
 	LoggedOut bool `json:"logged_out"`
 }
 
+// SetupPasswordResponse defines the API response for setting up a login password.
+type SetupPasswordResponse struct {
+	Setup bool `json:"setup"`
+}
+
+// ChangePasswordResponse defines the API response for changing a login password.
+type ChangePasswordResponse struct {
+	Changed bool `json:"changed"`
+}
+
 // DeleteMeResponse defines the API response for deleting the current account.
 type DeleteMeResponse struct {
 	Deleted bool `json:"deleted"`

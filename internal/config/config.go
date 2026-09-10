@@ -76,6 +76,7 @@ type AuthConfig struct {
 	AccessTokenTTLSeconds  int             `json:"access_token_ttl_seconds"`
 	RefreshTokenTTLSeconds int             `json:"refresh_token_ttl_seconds"`
 	PhoneCode              PhoneCodeConfig `json:"phone_code"`
+	Password               PasswordConfig  `json:"password"`
 }
 
 // PhoneCodeConfig defines phone verification code settings.
@@ -86,6 +87,13 @@ type PhoneCodeConfig struct {
 	DailySendLimit        int    `json:"daily_send_limit"`
 	UseDevFixedCode       bool   `json:"use_dev_fixed_code"`
 	DevFixedCode          string `json:"dev_fixed_code"`
+}
+
+// PasswordConfig defines password credential settings.
+type PasswordConfig struct {
+	BcryptCost          int `json:"bcrypt_cost"`
+	MaxFailedAttempts   int `json:"max_failed_attempts"`
+	LockDurationSeconds int `json:"lock_duration_seconds"`
 }
 
 // Load reads and validates application configuration from a JSON file.
@@ -184,6 +192,15 @@ func validate(cfg *Configuration) error {
 	}
 	if cfg.Auth.PhoneCode.UseDevFixedCode && strings.TrimSpace(cfg.Auth.PhoneCode.DevFixedCode) == "" {
 		return fmt.Errorf("invalid config: auth.phone_code.dev_fixed_code is required when use_dev_fixed_code is true")
+	}
+	if cfg.Auth.Password.BcryptCost <= 0 {
+		cfg.Auth.Password.BcryptCost = 12
+	}
+	if cfg.Auth.Password.MaxFailedAttempts <= 0 {
+		cfg.Auth.Password.MaxFailedAttempts = 5
+	}
+	if cfg.Auth.Password.LockDurationSeconds <= 0 {
+		cfg.Auth.Password.LockDurationSeconds = 900
 	}
 
 	return nil

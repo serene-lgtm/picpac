@@ -21,6 +21,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // AuthResult contains the authenticated user and tokens.
@@ -30,7 +31,10 @@ type AuthResult struct {
 	User         *domain.User
 }
 
-const defaultUserAvatarObjectKey = "users/default/avatar.png"
+const (
+	defaultUserAvatarObjectKey = "users/default/avatar.png"
+	passwordAlgorithmBcrypt    = "bcrypt"
+)
 
 // RefreshResult contains a refreshed access token.
 type RefreshResult struct {
@@ -41,8 +45,11 @@ type RefreshResult struct {
 type AuthService interface {
 	SendPhoneCode(ctx context.Context, input request.SendPhoneCodeInput) error
 	LoginWithPhone(ctx context.Context, input request.PhoneLoginInput) (*AuthResult, error)
+	LoginWithPhonePassword(ctx context.Context, input request.PhonePasswordLoginInput) (*AuthResult, error)
 	Refresh(ctx context.Context, input request.RefreshTokenInput) (*RefreshResult, error)
 	Logout(ctx context.Context, input request.LogoutInput) error
+	SetupPassword(ctx context.Context, input request.SetupPasswordInput) error
+	ChangePassword(ctx context.Context, input request.ChangePasswordInput) error
 	Me(ctx context.Context, userID string) (*domain.User, error)
 	UpdateMyProfile(ctx context.Context, userID string, input request.UpdateMyProfileInput) (*domain.User, error)
 	DeleteMe(ctx context.Context, userID string) error
@@ -53,10 +60,12 @@ type authService struct {
 	identities      repository.AuthIdentityRepository
 	phoneCodes      repository.PhoneVerificationCodeRepository
 	refreshTokens   repository.RefreshTokenRepository
+	passwords       repository.UserPasswordCredentialRepository
 	uploader        UploadService
 	sms             SMSService
 	tokens          TokenService
 	phoneCodeConfig config.PhoneCodeConfig
+	passwordConfig  config.PasswordConfig
 	refreshTokenTTL time.Duration
 }
 
@@ -66,6 +75,7 @@ func NewAuthService(
 	identities repository.AuthIdentityRepository,
 	phoneCodes repository.PhoneVerificationCodeRepository,
 	refreshTokens repository.RefreshTokenRepository,
+	passwords repository.UserPasswordCredentialRepository,
 	uploader UploadService,
 	sms SMSService,
 	tokens TokenService,
@@ -76,10 +86,12 @@ func NewAuthService(
 		identities:      identities,
 		phoneCodes:      phoneCodes,
 		refreshTokens:   refreshTokens,
+		passwords:       passwords,
 		uploader:        uploader,
 		sms:             sms,
 		tokens:          tokens,
 		phoneCodeConfig: authConfig.PhoneCode,
+		passwordConfig:  authConfig.Password,
 		refreshTokenTTL: time.Duration(authConfig.RefreshTokenTTLSeconds) * time.Second,
 	}
 }
@@ -171,6 +183,59 @@ func (s *authService) LoginWithPhone(ctx context.Context, input request.PhoneLog
 	return s.newAuthResult(ctx, user)
 }
 
+// LoginWithPhonePassword logs in with a phone number and password.
+func (s *authService) LoginWithPhonePassword(ctx context.Context, input request.PhonePasswordLoginInput) (*AuthResult, error) {
+	phone, err := normalizePhone(input.Phone)
+	if err != nil {
+		return nil, err
+	}
+	if input.Password == "" {
+		return nil, fmt.Errorf("password is required")
+	}
+
+	identity, err := s.identities.GetByProviderAndIdentifier(ctx, domain.AuthProviderPhone, phone)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("phone or password is invalid")
+		}
+		return nil, fmt.Errorf("get auth identity failed: %w", err)
+	}
+	user, err := s.getActiveUserByID(ctx, identity.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.passwords == nil {
+		return nil, fmt.Errorf("password credential repository is not configured")
+	}
+	credential, err := s.passwords.GetByUserID(ctx, user.ID)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("phone or password is invalid")
+		}
+		return nil, fmt.Errorf("get password credential failed: %w", err)
+	}
+
+	now := time.Now().UTC()
+	if credential.LockedUntil != nil && credential.LockedUntil.After(now) {
+		return nil, fmt.Errorf("password is locked")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(credential.PasswordHash), []byte(input.Password)); err != nil {
+		if recordErr := s.recordPasswordFailure(ctx, credential, now); recordErr != nil {
+			return nil, recordErr
+		}
+		return nil, fmt.Errorf("phone or password is invalid")
+	}
+	if err := s.passwords.RecordSuccess(ctx, user.ID, now); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("phone or password is invalid")
+		}
+		return nil, fmt.Errorf("record password login success failed: %w", err)
+	}
+
+	return s.newAuthResult(ctx, user)
+}
+
 // Refresh refreshes access token.
 func (s *authService) Refresh(ctx context.Context, input request.RefreshTokenInput) (*RefreshResult, error) {
 	refreshToken := strings.TrimSpace(input.RefreshToken)
@@ -219,6 +284,126 @@ func (s *authService) Logout(ctx context.Context, input request.LogoutInput) err
 			return fmt.Errorf("refresh token is invalid")
 		}
 		return fmt.Errorf("revoke refresh token failed: %w", err)
+	}
+
+	return nil
+}
+
+// SetupPassword sets up the current user's first login password.
+func (s *authService) SetupPassword(ctx context.Context, input request.SetupPasswordInput) error {
+	userID, err := parseObjectID(input.UserID)
+	if err != nil {
+		return err
+	}
+	phone, err := normalizePhone(input.Phone)
+	if err != nil {
+		return err
+	}
+	if input.Password == "" {
+		return fmt.Errorf("password is required")
+	}
+	if err := validatePasswordStrength(input.Password); err != nil {
+		return err
+	}
+
+	identity, err := s.identities.GetByProviderAndIdentifier(ctx, domain.AuthProviderPhone, phone)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return fmt.Errorf("phone does not match current user")
+		}
+		return fmt.Errorf("get auth identity failed: %w", err)
+	}
+	if identity.UserID != userID {
+		return fmt.Errorf("phone does not match current user")
+	}
+	if _, err := s.getActiveUserByID(ctx, userID); err != nil {
+		return err
+	}
+
+	if s.passwords == nil {
+		return fmt.Errorf("password credential repository is not configured")
+	}
+	if _, err := s.passwords.GetByUserID(ctx, userID); err == nil {
+		return fmt.Errorf("password already setup")
+	} else if !errors.Is(err, mongo.ErrNoDocuments) {
+		return fmt.Errorf("get password credential failed: %w", err)
+	}
+
+	passwordHash, err := s.hashPassword(input.Password)
+	if err != nil {
+		return fmt.Errorf("hash password failed: %w", err)
+	}
+
+	now := time.Now().UTC()
+	credential := &domain.UserPasswordCredential{
+		ID:                 bson.NewObjectID(),
+		UserID:             userID,
+		PasswordHash:       passwordHash,
+		PasswordAlgo:       passwordAlgorithmBcrypt,
+		FailedAttemptCount: 0,
+		LockedUntil:        nil,
+		LastUsedAt:         nil,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	if err := s.passwords.Create(ctx, credential); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return fmt.Errorf("password already setup")
+		}
+		return fmt.Errorf("create password credential failed: %w", err)
+	}
+
+	return nil
+}
+
+// ChangePassword changes the current user's login password.
+func (s *authService) ChangePassword(ctx context.Context, input request.ChangePasswordInput) error {
+	userID, err := parseObjectID(input.UserID)
+	if err != nil {
+		return err
+	}
+	if input.OldPassword == "" {
+		return fmt.Errorf("old password is required")
+	}
+	if input.NewPassword == "" {
+		return fmt.Errorf("new password is required")
+	}
+	if err := validatePasswordStrength(input.NewPassword); err != nil {
+		return err
+	}
+	if _, err := s.getActiveUserByID(ctx, userID); err != nil {
+		return err
+	}
+	if s.passwords == nil {
+		return fmt.Errorf("password credential repository is not configured")
+	}
+	credential, err := s.passwords.GetByUserID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return fmt.Errorf("password credential not found")
+		}
+		return fmt.Errorf("get password credential failed: %w", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(credential.PasswordHash), []byte(input.OldPassword)); err != nil {
+		return fmt.Errorf("password is invalid")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(credential.PasswordHash), []byte(input.NewPassword)); err == nil {
+		return fmt.Errorf("new password must be different")
+	}
+
+	passwordHash, err := s.hashPassword(input.NewPassword)
+	if err != nil {
+		return fmt.Errorf("hash password failed: %w", err)
+	}
+	now := time.Now().UTC()
+	if err := s.passwords.UpdatePassword(ctx, userID, passwordHash, passwordAlgorithmBcrypt, now); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return fmt.Errorf("password credential not found")
+		}
+		return fmt.Errorf("update password credential failed: %w", err)
+	}
+	if err := s.refreshTokens.RevokeByUserID(ctx, userID, now); err != nil {
+		return fmt.Errorf("revoke refresh tokens failed: %w", err)
 	}
 
 	return nil
@@ -483,6 +668,99 @@ func hashPhoneCode(phone string, code string) string {
 
 func newDefaultUsername(phone string) string {
 	return "user" + digitsOnly(phone)
+}
+
+func (s *authService) hashPassword(password string) (string, error) {
+	cost := s.passwordConfig.BcryptCost
+	if cost <= 0 {
+		cost = bcrypt.DefaultCost
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), cost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+func (s *authService) recordPasswordFailure(ctx context.Context, credential *domain.UserPasswordCredential, now time.Time) error {
+	failedAttemptCount := credential.FailedAttemptCount
+	if credential.LockedUntil != nil && !credential.LockedUntil.After(now) {
+		failedAttemptCount = 0
+	}
+	failedAttemptCount++
+	var lockedUntil *time.Time
+	if failedAttemptCount >= s.passwordMaxFailedAttempts() {
+		value := now.Add(s.passwordLockDuration())
+		lockedUntil = &value
+	}
+	if err := s.passwords.RecordFailure(ctx, credential.UserID, failedAttemptCount, lockedUntil, now); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return fmt.Errorf("phone or password is invalid")
+		}
+		return fmt.Errorf("record password login failure failed: %w", err)
+	}
+	return nil
+}
+
+func (s *authService) passwordMaxFailedAttempts() int {
+	if s.passwordConfig.MaxFailedAttempts <= 0 {
+		return 5
+	}
+	return s.passwordConfig.MaxFailedAttempts
+}
+
+func (s *authService) passwordLockDuration() time.Duration {
+	if s.passwordConfig.LockDurationSeconds <= 0 {
+		return 15 * time.Minute
+	}
+	return time.Duration(s.passwordConfig.LockDurationSeconds) * time.Second
+}
+
+func validatePasswordStrength(password string) error {
+	runes := []rune(password)
+	if len(runes) < 8 {
+		return fmt.Errorf("password is too short")
+	}
+	if len(runes) > 32 {
+		return fmt.Errorf("password is too long")
+	}
+	if strings.TrimSpace(password) != password {
+		return fmt.Errorf("password has invalid spaces")
+	}
+
+	hasUpper := false
+	hasLower := false
+	hasDigit := false
+	hasSpecial := false
+	for _, r := range runes {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			hasUpper = true
+		case r >= 'a' && r <= 'z':
+			hasLower = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		case isAllowedPasswordSpecial(r):
+			hasSpecial = true
+		default:
+			return fmt.Errorf("password has invalid characters")
+		}
+	}
+	categoryCount := 0
+	for _, ok := range []bool{hasUpper, hasLower, hasDigit, hasSpecial} {
+		if ok {
+			categoryCount++
+		}
+	}
+	if categoryCount < 3 {
+		return fmt.Errorf("password is too weak")
+	}
+
+	return nil
+}
+
+func isAllowedPasswordSpecial(r rune) bool {
+	return strings.ContainsRune("_#!@$%^&*()+=-", r)
 }
 
 func parseRequiredUserGender(value string) (domain.UserGender, error) {

@@ -83,6 +83,37 @@ func (h *AuthHandler) LoginWithPhone(c *gin.Context) {
 	c.JSON(http.StatusOK, authResponse)
 }
 
+// LoginWithPhonePassword handles phone password login requests.
+func (h *AuthHandler) LoginWithPhonePassword(c *gin.Context) {
+	var input request.PhonePasswordLoginInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+		return
+	}
+	if strings.TrimSpace(input.Phone) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "phone is required"})
+		return
+	}
+	if input.Password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "password is required"})
+		return
+	}
+
+	result, err := h.svc.LoginWithPhonePassword(c.Request.Context(), input)
+	if err != nil {
+		respondAuthError(c, err)
+		return
+	}
+
+	authResponse, err := h.buildAuthResponse(c.Request.Context(), result)
+	if err != nil {
+		respondAuthError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, authResponse)
+}
+
 // Refresh handles refresh token requests.
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	var input request.RefreshTokenInput
@@ -124,6 +155,68 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response.LogoutResponse{LoggedOut: true})
+}
+
+// SetupPassword handles first-time password setup requests.
+func (h *AuthHandler) SetupPassword(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	var input request.SetupPasswordInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+		return
+	}
+	if strings.TrimSpace(input.Phone) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "phone is required"})
+		return
+	}
+	if input.Password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "password is required"})
+		return
+	}
+	input.UserID = userID
+
+	if err := h.svc.SetupPassword(c.Request.Context(), input); err != nil {
+		respondAuthError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response.SetupPasswordResponse{Setup: true})
+}
+
+// ChangePassword handles login password change requests.
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	var input request.ChangePasswordInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+		return
+	}
+	if input.OldPassword == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "old password is required"})
+		return
+	}
+	if input.NewPassword == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "new password is required"})
+		return
+	}
+	input.UserID = userID
+
+	if err := h.svc.ChangePassword(c.Request.Context(), input); err != nil {
+		respondAuthError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response.ChangePasswordResponse{Changed: true})
 }
 
 // Me handles current user requests.
@@ -222,6 +315,15 @@ func respondAuthError(c *gin.Context, err error) {
 		strings.Contains(message, "phone code is invalid"),
 		strings.Contains(message, "code is required"),
 		strings.Contains(message, "refresh token is required"),
+		strings.Contains(message, "password is required"),
+		strings.Contains(message, "old password is required"),
+		strings.Contains(message, "new password is required"),
+		strings.Contains(message, "password is too short"),
+		strings.Contains(message, "password is too long"),
+		strings.Contains(message, "password is too weak"),
+		strings.Contains(message, "password has invalid spaces"),
+		strings.Contains(message, "password has invalid characters"),
+		strings.Contains(message, "new password must be different"),
 		strings.Contains(message, "username is required"),
 		strings.Contains(message, "gender is required"),
 		strings.Contains(message, "avatar is required"),
@@ -233,15 +335,24 @@ func respondAuthError(c *gin.Context, err error) {
 		strings.Contains(message, "access token is expired"),
 		strings.Contains(message, "refresh token is invalid"),
 		strings.Contains(message, "refresh token is expired"),
-		strings.Contains(message, "refresh token is revoked"):
+		strings.Contains(message, "refresh token is revoked"),
+		strings.Contains(message, "phone or password is invalid"),
+		strings.Contains(message, "password is invalid"):
 		status = http.StatusUnauthorized
 	case strings.Contains(message, "user is disabled"):
+		status = http.StatusForbidden
+	case strings.Contains(message, "password is locked"):
+		status = http.StatusForbidden
+	case strings.Contains(message, "phone does not match current user"):
 		status = http.StatusForbidden
 	case strings.Contains(message, "phone code send too frequently"):
 		status = http.StatusTooManyRequests
 	case strings.Contains(message, "user not found"):
 		status = http.StatusNotFound
-	case strings.Contains(message, "create auth identity failed"):
+	case strings.Contains(message, "password credential not found"):
+		status = http.StatusNotFound
+	case strings.Contains(message, "create auth identity failed"),
+		strings.Contains(message, "password already setup"):
 		status = http.StatusConflict
 	case strings.Contains(message, "upload user avatar failed"):
 		status = http.StatusBadGateway
