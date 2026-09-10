@@ -75,14 +75,15 @@ OSS object key 约定：
 - `429`: 验证码发送过于频繁
 - `500`: 创建验证码或发送验证码失败
 
-### Phone Login
+### Phone Code Login
 
-`POST /api/v1/auth/phone/login`
+`POST /api/v1/auth/phone/code/login`
 
 用途：
 - 使用手机号和验证码登录
 - 首次手机号登录会自动创建 `User` 和 `AuthIdentity(provider=phone)`
 - 已存在手机号会复用原 User
+- 旧路径 `POST /api/v1/auth/phone/login` 暂时保留兼容，语义与本接口一致
 
 请求类型：
 - `application/json`
@@ -125,6 +126,62 @@ OSS object key 约定：
 - `404`: 已绑定身份对应的 User 不存在
 - `409`: 创建登录身份发生冲突且无法恢复
 - `500`: 创建 User、AuthIdentity、token 或生成头像访问 URL 失败
+
+### Phone Password Login
+
+`POST /api/v1/auth/phone/password/login`
+
+用途：
+- 使用手机号和登录密码登录
+- 该接口不会自动创建用户；用户必须已经通过 `POST /api/v1/auth/password/setup` 设置过密码
+- 后端通过 `AuthIdentity(provider=phone, identifier=normalized_phone)` 找到对应 user，再校验 `user_password_credentials` 中的 password hash
+- 密码登录成功后会清空 `failed_attempt_count` 和 `locked_until`，并更新 `last_used_at`
+- 密码登录失败后会增加 `failed_attempt_count`；连续失败达到阈值后会设置 `locked_until`
+- `locked_until` 过期后再次尝试时，会重新按第 1 次失败开始计数，不会延续上一个锁定周期前的失败次数
+- 默认连续失败 5 次锁定 15 分钟
+
+请求类型：
+- `application/json`
+
+请求字段：
+- `phone`: string，必填。中国大陆 11 位手机号会标准化为 `+86` 格式
+- `password`: string，必填
+
+请求示例：
+
+```json
+{
+  "phone": "13800138000",
+  "password": "Trip2026Pass"
+}
+```
+
+成功响应：
+
+```json
+{
+  "access_token": "...",
+  "refresh_token": "...",
+  "user": {
+    "id": "6821c0c1f1b2f4d5a6b7c8d1",
+    "profile": {
+      "username": "user8613800138000",
+      "gender": "",
+      "birthday": "",
+      "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/users/default/avatar.png?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
+      "avatar_source_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/users/default/avatar.png?Expires=1783588103&OSSAccessKeyId=...&Signature=..."
+    },
+    "status": "created"
+  }
+}
+```
+
+失败响应：
+- `400`: 缺少 `phone`、缺少 `password`，或手机号格式非法
+- `401`: 手机号或密码错误；手机号不存在、未设置密码、密码错误都会返回统一错误
+- `403`: 密码登录已锁定，或用户已禁用
+- `404`: 已绑定身份对应的 User 不存在
+- `500`: 查询 AuthIdentity、查询/更新 password credential、创建 token 或生成头像访问 URL 失败
 
 ### Refresh Auth Token
 
@@ -181,6 +238,108 @@ OSS object key 约定：
 - `400`: 缺少 `refresh_token`
 - `401`: refresh token 非法
 - `500`: revoke refresh token 失败
+
+### Setup Password
+
+`POST /api/v1/auth/password/setup`
+
+用途：
+- 当前登录用户第一次设置手机号登录密码
+- 该接口只用于首次设置；如果用户已经设置过密码，会返回 `409`
+- 前端传入手机号作为当前账号确认字段，后端仍以 access token 中的 user id 作为当前用户来源
+- 后端通过 `AuthIdentity(provider=phone, identifier=normalized_phone)` 校验该手机号属于当前登录用户
+- 后端只保存 password hash，不保存明文密码
+
+请求类型：
+- `application/json`
+
+请求头：
+- `Authorization: Bearer <access_token>`
+
+请求字段：
+- `phone`: string，必填。中国大陆 11 位手机号会标准化为 `+86` 格式；必须属于当前登录用户
+- `password`: string，必填
+
+密码规则：
+- 长度 8-32 个字符
+- 只能包含大小写英文字母、数字和以下特殊字符：`_#!@$%^&*()+=-`
+- 必须至少包含以下 4 类中的任意 3 类：大写字母、小写字母、数字、特殊字符
+- 不能有首尾空格
+- 不允许中文、空格、emoji 或未列出的其他特殊字符
+
+请求示例：
+
+```json
+{
+  "phone": "13800138000",
+  "password": "Trip2026Pass"
+}
+```
+
+成功响应：
+
+```json
+{
+  "setup": true
+}
+```
+
+失败响应：
+- `400`: 缺少 `phone`、缺少 `password`、手机号格式非法，或密码不符合规则
+- `401`: 缺少 access token，access token 非法或已过期
+- `403`: 手机号不属于当前登录用户，或用户已禁用
+- `404`: User 不存在
+- `409`: 当前用户已经设置过密码
+- `500`: 查询 AuthIdentity、查询/创建 password credential 或 hash password 失败
+
+### Change Password
+
+`PUT /api/v1/auth/password`
+
+用途：
+- 当前登录用户修改已设置的手机号登录密码
+- 需要输入当前密码 `old_password`，不能通过该接口找回密码
+- 新密码必须符合 Setup Password 中相同的密码规则
+- 新密码不能和当前密码相同
+- 修改成功后，后端会 revoke 当前用户所有未失效的 refresh token
+- access token 当前不落库，后端不会精确撤销已签发且未过期的 access token
+- 前端在收到成功响应后必须主动清空本地 access token 和 refresh token，并跳转登录页要求用户重新登录
+- 修改密码不会更新 `last_used_at`；该字段只表示上次成功使用密码登录的时间
+- 修改成功会清空 `failed_attempt_count` 和 `locked_until`
+
+请求类型：
+- `application/json`
+
+请求头：
+- `Authorization: Bearer <access_token>`
+
+请求字段：
+- `old_password`: string，必填，当前登录密码
+- `new_password`: string，必填，新登录密码
+
+请求示例：
+
+```json
+{
+  "old_password": "Trip2026Pass",
+  "new_password": "NewTrip2027"
+}
+```
+
+成功响应：
+
+```json
+{
+  "changed": true
+}
+```
+
+失败响应：
+- `400`: 缺少 `old_password`、缺少 `new_password`、新密码不符合规则，或新密码与当前密码相同
+- `401`: 缺少 access token，access token 非法或已过期，或 `old_password` 错误
+- `403`: 用户已禁用
+- `404`: User 不存在，或当前用户尚未设置密码
+- `500`: 查询/更新 password credential、hash password 或 revoke refresh token 失败
 
 ### Delete Account
 

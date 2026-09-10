@@ -13,6 +13,12 @@ type PhoneLoginInput struct {
 	Code  string `json:"code"`
 }
 
+// PhonePasswordLoginInput defines the input for phone password login.
+type PhonePasswordLoginInput struct {
+	Phone    string `json:"phone"`
+	Password string `json:"password"`
+}
+
 // RefreshTokenInput defines the input for refreshing auth tokens.
 type RefreshTokenInput struct {
 	RefreshToken string `json:"refresh_token"`
@@ -21,6 +27,20 @@ type RefreshTokenInput struct {
 // LogoutInput defines the input for logging out.
 type LogoutInput struct {
 	RefreshToken string `json:"refresh_token"`
+}
+
+// SetupPasswordInput defines the input for setting up a login password.
+type SetupPasswordInput struct {
+	UserID   string `json:"-"`
+	Phone    string `json:"phone"`
+	Password string `json:"password"`
+}
+
+// ChangePasswordInput defines the input for changing a login password.
+type ChangePasswordInput struct {
+	UserID      string `json:"-"`
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
 }
 
 // UpdateMyProfileInput defines the input for updating the current user profile.
