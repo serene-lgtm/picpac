@@ -23,6 +23,8 @@ import (
 
 type fakeAuthService struct {
 	err                 error
+	sendPhoneCodeCalls  int
+	phoneLoginCalls     int
 	passwordLoginErr    error
 	setupPasswordErr    error
 	changePasswordErr   error
@@ -45,10 +47,12 @@ func (s fakeObjectURLSigner) SignGetURL(_ context.Context, objectKey string) (st
 }
 
 func (s *fakeAuthService) SendPhoneCode(_ context.Context, _ request.SendPhoneCodeInput) error {
+	s.sendPhoneCodeCalls++
 	return s.err
 }
 
 func (s *fakeAuthService) LoginWithPhone(_ context.Context, _ request.PhoneLoginInput) (*service.AuthResult, error) {
+	s.phoneLoginCalls++
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -155,6 +159,28 @@ func TestSendPhoneCodeHandlerReturnsSent(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), `"sent":true`) {
 		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestSendPhoneCodeHandlerRequiresPhone(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	authService := &fakeAuthService{}
+	authHandler := NewAuthHandler(authService, fakeObjectURLSigner{})
+	router.POST("/api/v1/auth/phone/code", authHandler.SendPhoneCode)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/phone/code", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest || recorder.Body.String() != `{"error":"phone is required"}` {
+		t.Fatalf("unexpected response: %d %s", recorder.Code, recorder.Body.String())
+	}
+	if authService.sendPhoneCodeCalls != 0 {
+		t.Fatal("invalid input reached auth service")
 	}
 }
 
@@ -417,7 +443,8 @@ func TestLoginWithPhoneHandlerRejectsMissingCode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	router := gin.New()
-	authHandler := NewAuthHandler(&fakeAuthService{}, fakeObjectURLSigner{})
+	authService := &fakeAuthService{}
+	authHandler := NewAuthHandler(authService, fakeObjectURLSigner{})
 	router.POST("/api/v1/auth/phone/login", authHandler.LoginWithPhone)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/phone/login", bytes.NewBufferString(`{"phone":"13800138000"}`))
@@ -427,15 +454,47 @@ func TestLoginWithPhoneHandlerRejectsMissingCode(t *testing.T) {
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", recorder.Code)
 	}
+	if recorder.Body.String() != `{"error":"code is required"}` {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+	if authService.phoneLoginCalls != 0 {
+		t.Fatal("invalid input reached auth service")
+	}
 }
 
-func TestAuthHandlerMapsTooFrequent(t *testing.T) {
+func TestLoginWithPhoneHandlerValidatesCodeShape(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []string{"12345", "1234567", "abcdef"} {
+		t.Run(code, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			recorder := httptest.NewRecorder()
+			router := gin.New()
+			authService := &fakeAuthService{}
+			authHandler := NewAuthHandler(authService, fakeObjectURLSigner{})
+			router.POST("/api/v1/auth/phone/code/login", authHandler.LoginWithPhone)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/phone/code/login", bytes.NewBufferString(`{"phone":"13800138000","code":"`+code+`"}`))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest || recorder.Body.String() != `{"error":"phone code is invalid"}` {
+				t.Fatalf("unexpected response: %d %s", recorder.Code, recorder.Body.String())
+			}
+			if authService.phoneLoginCalls != 0 {
+				t.Fatal("invalid input reached auth service")
+			}
+		})
+	}
+}
+
+func TestAuthHandlerMapsProviderRateLimit(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	router := gin.New()
-	authHandler := NewAuthHandler(&fakeAuthService{err: errors.New("phone code send too frequently")}, fakeObjectURLSigner{})
+	authHandler := NewAuthHandler(&fakeAuthService{err: service.ErrPhoneCodeRateLimited}, fakeObjectURLSigner{})
 	router.POST("/api/v1/auth/phone/code", authHandler.SendPhoneCode)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/phone/code", bytes.NewBufferString(`{"phone":"13800138000"}`))
@@ -444,6 +503,42 @@ func TestAuthHandlerMapsTooFrequent(t *testing.T) {
 
 	if recorder.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d", recorder.Code)
+	}
+	if recorder.Body.String() != `{"error":"phone code send too frequently"}` {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestAuthHandlerMapsPhoneVerificationUnavailable(t *testing.T) {
+	t.Parallel()
+
+	for _, endpoint := range []string{"/api/v1/auth/phone/code", "/api/v1/auth/phone/code/login"} {
+		t.Run(endpoint, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			recorder := httptest.NewRecorder()
+			router := gin.New()
+			authHandler := NewAuthHandler(&fakeAuthService{err: service.ErrPhoneVerificationUnavailable}, fakeObjectURLSigner{})
+			if endpoint == "/api/v1/auth/phone/code" {
+				router.POST(endpoint, authHandler.SendPhoneCode)
+			} else {
+				router.POST(endpoint, authHandler.LoginWithPhone)
+			}
+
+			body := `{"phone":"13800138000"}`
+			if strings.HasSuffix(endpoint, "/login") {
+				body = `{"phone":"13800138000","code":"123456"}`
+			}
+			req := httptest.NewRequest(http.MethodPost, endpoint, bytes.NewBufferString(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadGateway {
+				t.Fatalf("expected 502, got %d: %s", recorder.Code, recorder.Body.String())
+			}
+			if recorder.Body.String() != `{"error":"phone verification service is unavailable"}` {
+				t.Fatalf("unexpected body: %s", recorder.Body.String())
+			}
+		})
 	}
 }
 
