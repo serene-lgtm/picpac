@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"pack_mate/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 )
 
 const (
@@ -36,11 +38,7 @@ func NewAuthHandler(svc service.AuthService, urlSigner service.ObjectURLSigner) 
 func (h *AuthHandler) SendPhoneCode(c *gin.Context) {
 	var input request.SendPhoneCodeInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
-		return
-	}
-	if strings.TrimSpace(input.Phone) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "phone is required"})
+		respondPhoneInputError(c, err)
 		return
 	}
 
@@ -56,15 +54,7 @@ func (h *AuthHandler) SendPhoneCode(c *gin.Context) {
 func (h *AuthHandler) LoginWithPhone(c *gin.Context) {
 	var input request.PhoneLoginInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
-		return
-	}
-	if strings.TrimSpace(input.Phone) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "phone is required"})
-		return
-	}
-	if strings.TrimSpace(input.Code) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "code is required"})
+		respondPhoneInputError(c, err)
 		return
 	}
 
@@ -81,6 +71,25 @@ func (h *AuthHandler) LoginWithPhone(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, authResponse)
+}
+
+func respondPhoneInputError(c *gin.Context, err error) {
+	message := "invalid input"
+	var validationErrors validator.ValidationErrors
+	if errors.As(err, &validationErrors) && len(validationErrors) > 0 {
+		fieldError := validationErrors[0]
+		switch fieldError.Field() {
+		case "Phone":
+			message = "phone is required"
+		case "Code":
+			if fieldError.Tag() == "required" {
+				message = "code is required"
+			} else {
+				message = "phone code is invalid"
+			}
+		}
+	}
+	c.JSON(http.StatusBadRequest, gin.H{"error": message})
 }
 
 // LoginWithPhonePassword handles phone password login requests.
@@ -308,6 +317,10 @@ func respondAuthError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	message := err.Error()
 	switch {
+	case errors.Is(err, service.ErrPhoneCodeRateLimited):
+		status = http.StatusTooManyRequests
+	case errors.Is(err, service.ErrPhoneVerificationUnavailable):
+		status = http.StatusBadGateway
 	case strings.Contains(message, "invalid input"),
 		strings.Contains(message, "phone is required"),
 		strings.Contains(message, "phone is invalid"),
@@ -345,8 +358,6 @@ func respondAuthError(c *gin.Context, err error) {
 		status = http.StatusForbidden
 	case strings.Contains(message, "phone does not match current user"):
 		status = http.StatusForbidden
-	case strings.Contains(message, "phone code send too frequently"):
-		status = http.StatusTooManyRequests
 	case strings.Contains(message, "user not found"):
 		status = http.StatusNotFound
 	case strings.Contains(message, "password credential not found"):

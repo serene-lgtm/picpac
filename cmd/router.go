@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -17,7 +18,11 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-func newRouter(cfg *config.Configuration, bucket *oss.Bucket, db *mongo.Database) *gin.Engine {
+func newRouter(cfg *config.Configuration, bucket *oss.Bucket, db *mongo.Database) (*gin.Engine, error) {
+	verification, err := newPhoneVerificationService(cfg)
+	if err != nil {
+		return nil, err
+	}
 	router := gin.Default()
 	router.Use(corsMiddleware(cfg.CORS.AllowedOrigins))
 
@@ -27,7 +32,6 @@ func newRouter(cfg *config.Configuration, bucket *oss.Bucket, db *mongo.Database
 	categoryRepo := mongodb.NewCategoryRepository(db)
 	userRepo := mongodb.NewUserRepository(db)
 	authIdentityRepo := mongodb.NewAuthIdentityRepository(db)
-	phoneCodeRepo := mongodb.NewPhoneVerificationCodeRepository(db)
 	refreshTokenRepo := mongodb.NewRefreshTokenRepository(db)
 	passwordCredentialRepo := mongodb.NewUserPasswordCredentialRepository(db)
 	uploadService := service.NewOSSUploadService(bucket, cfg.OSS.SignedURLTTLSeconds)
@@ -36,7 +40,7 @@ func newRouter(cfg *config.Configuration, bucket *oss.Bucket, db *mongo.Database
 	itemService := service.NewItemService(itemRepo, uploadService, categoryService)
 	packService := service.NewPackService(packRepo, itemRepo)
 	checklistService := service.NewChecklistService(checklistRepo, itemRepo)
-	authService := service.NewAuthService(userRepo, authIdentityRepo, phoneCodeRepo, refreshTokenRepo, passwordCredentialRepo, uploadService, service.NewFakeSMSService(), tokenService, cfg.Auth)
+	authService := service.NewAuthService(userRepo, authIdentityRepo, refreshTokenRepo, passwordCredentialRepo, uploadService, verification, tokenService, cfg.Auth, cfg.Env)
 	chatClient := llm.NewDeepSeekChatClient(cfg.Deepseek)
 	recommendationAgent := agent.NewRecommendationPlannerAgent(chatClient)
 	itemDraftExtractionAgent := agent.NewChatItemDraftExtractionAgent(chatClient)
@@ -44,7 +48,17 @@ func newRouter(cfg *config.Configuration, bucket *oss.Bucket, db *mongo.Database
 
 	registerAPIRoutes(router, itemService, packService, checklistService, categoryService, aiSuggestionService, authService, tokenService, uploadService)
 
-	return router
+	return router, nil
+}
+
+func newPhoneVerificationService(cfg *config.Configuration) (service.PhoneVerificationService, error) {
+	if cfg.Env == "dev" {
+		return nil, nil
+	}
+	if cfg.Env != "prod" {
+		return nil, fmt.Errorf("invalid config: env must be dev or prod")
+	}
+	return service.NewAliyunPhoneVerificationService(cfg.Auth.PhoneCode)
 }
 
 func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService, checklistService service.ChecklistService, categoryService service.CategoryService, aiSuggestionService service.AISuggestionService, authService service.AuthService, tokenService service.TokenService, objectURLSigner service.ObjectURLSigner) {
