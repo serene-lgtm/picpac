@@ -43,6 +43,13 @@ type ChangePasswordInput struct {
 	NewPassword string `json:"new_password"`
 }
 
+// ResetPasswordInput defines the HTTP input for resetting a password with a phone code.
+type ResetPasswordInput struct {
+	Phone       string `json:"phone" binding:"required"`
+	Code        string `json:"code" binding:"required,len=6,numeric"`
+	NewPassword string `json:"new_password" binding:"required"`
+}
+
 // UpdateMyProfileInput defines the input for updating the current user profile.
 type UpdateMyProfileInput struct {
 	Username string

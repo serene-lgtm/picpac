@@ -66,6 +66,7 @@ type RefreshResult struct {
 
 // AuthService defines authentication behavior.
 type AuthService interface {
+	ResetPassword(ctx context.Context, input ResetPasswordInput) error
 	SendPhoneCode(ctx context.Context, input request.SendPhoneCodeInput) error
 	LoginWithPhone(ctx context.Context, input request.PhoneLoginInput) (*AuthResult, error)
 	LoginWithPhonePassword(ctx context.Context, input request.PhonePasswordLoginInput) (*AuthResult, error)
