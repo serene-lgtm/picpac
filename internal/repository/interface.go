@@ -76,6 +76,7 @@ type UserRepository interface {
 type AuthIdentityRepository interface {
 	Create(ctx context.Context, identity *domain.AuthIdentity) error
 	GetByProviderAndIdentifier(ctx context.Context, provider domain.AuthProvider, identifier string) (*domain.AuthIdentity, error)
+	GetByUserIDAndProvider(ctx context.Context, userID bson.ObjectID, provider domain.AuthProvider) (*domain.AuthIdentity, error)
 	DisableByUserID(ctx context.Context, userID bson.ObjectID, disabledAt time.Time) error
 }
 

@@ -48,6 +48,12 @@ type ChangePasswordResponse struct {
 	Changed bool `json:"changed"`
 }
 
+// AuthSecurityResponse defines the API response for account security status.
+type AuthSecurityResponse struct {
+	Phone         string `json:"phone"`
+	PasswordSetup bool   `json:"password_setup"`
+}
+
 // DeleteMeResponse defines the API response for deleting the current account.
 type DeleteMeResponse struct {
 	Deleted bool `json:"deleted"`

@@ -239,6 +239,40 @@ OSS object key 约定：
 - `401`: refresh token 非法
 - `500`: revoke refresh token 失败
 
+### Auth Security
+
+`GET /api/v1/auth/security`
+
+用途：
+- 查询当前登录用户的账号安全状态
+- 前端账号安全页可用该接口展示手机号和登录密码是否已设置
+- 该接口只返回展示所需状态，不返回 password hash、失败次数、锁定时间等内部安全字段
+
+请求头：
+- `Authorization: Bearer <access_token>`
+
+请求体：
+- 无
+
+成功响应：
+
+```json
+{
+  "phone": "138****8000",
+  "password_setup": true
+}
+```
+
+响应字段：
+- `phone`: string，当前用户手机号的脱敏展示值；如果当前用户没有绑定手机号，则返回空字符串
+- `password_setup`: boolean，当前用户是否已经设置登录密码
+
+失败响应：
+- `401`: 缺少 access token，access token 非法或已过期
+- `403`: 用户已禁用
+- `404`: User 不存在
+- `500`: 查询 AuthIdentity 或 password credential 失败
+
 ### Setup Password
 
 `POST /api/v1/auth/password/setup`

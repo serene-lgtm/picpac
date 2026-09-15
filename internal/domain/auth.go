@@ -57,6 +57,11 @@ type RefreshToken struct {
 	UpdatedAt time.Time     `json:"updated_at"`
 }
 
+type AuthSecurity struct {
+	Phone         string `json:"phone"`
+	PasswordSetup bool   `json:"password_setup"`
+}
+
 type UserPasswordCredential struct {
 	ID                 bson.ObjectID `json:"id"`
 	UserID             bson.ObjectID `json:"user_id"`

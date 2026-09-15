@@ -27,6 +27,7 @@ type fakeAuthService struct {
 	setupPasswordErr    error
 	changePasswordErr   error
 	user                *domain.User
+	security            *domain.AuthSecurity
 	deletedUserID       string
 	passwordLoginInput  request.PhonePasswordLoginInput
 	setupPasswordInput  request.SetupPasswordInput
@@ -88,6 +89,16 @@ func (s *fakeAuthService) ChangePassword(_ context.Context, input request.Change
 		return s.changePasswordErr
 	}
 	return nil
+}
+
+func (s *fakeAuthService) GetSecurity(_ context.Context, _ string) (*domain.AuthSecurity, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.security != nil {
+		return s.security, nil
+	}
+	return &domain.AuthSecurity{Phone: "138****8000", PasswordSetup: true}, nil
 }
 
 func (s *fakeAuthService) Me(_ context.Context, _ string) (*domain.User, error) {
@@ -472,6 +483,45 @@ func TestMeHandlerReturnsCurrentUser(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), userID.Hex()) {
 		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestGetSecurityHandlerReturnsCurrentSecurity(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	router := gin.New()
+	tokenService := service.NewTokenService("test-secret", time.Hour)
+	userID := bson.NewObjectID()
+	token, err := tokenService.CreateAccessToken(userID)
+	if err != nil {
+		t.Fatalf("CreateAccessToken returned error: %v", err)
+	}
+	authService := &fakeAuthService{
+		user:     &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: "users/default/avatar.png"}, Status: domain.UserStatusCreated},
+		security: &domain.AuthSecurity{Phone: "138****8000", PasswordSetup: false},
+	}
+	authHandler := NewAuthHandler(authService, fakeObjectURLSigner{})
+	authMiddleware := NewAuthMiddleware(tokenService, authHandler.svc)
+	router.GET("/api/v1/auth/security", authMiddleware.RequireAuth(), authHandler.GetSecurity)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/security", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	var resp struct {
+		Phone         string `json:"phone"`
+		PasswordSetup bool   `json:"password_setup"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Phone != "138****8000" || resp.PasswordSetup {
+		t.Fatalf("unexpected security response: %+v", resp)
 	}
 }
 

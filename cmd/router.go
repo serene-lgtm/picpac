@@ -67,6 +67,7 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 	authRoutes.POST("/logout", authHandler.Logout)
 	authRoutes.POST("/password/setup", authMiddleware.RequireAuth(), authHandler.SetupPassword)
 	authRoutes.PUT("/password", authMiddleware.RequireAuth(), authHandler.ChangePassword)
+	authRoutes.GET("/security", authMiddleware.RequireAuth(), authHandler.GetSecurity)
 	authRoutes.DELETE("/me", authMiddleware.RequireAuth(), authHandler.DeleteMe)
 	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
 	router.PUT("/api/v1/me/profile", authMiddleware.RequireAuth(), authHandler.UpdateMyProfile)
