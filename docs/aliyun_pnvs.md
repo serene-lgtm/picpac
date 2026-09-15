@@ -1,7 +1,8 @@
 # 阿里云号码认证原子能力
 
 `config.AliyunPNVSConfig` 和 `service.PhoneVerificationService` 的生产实现为
-`service.AliyunPhoneVerificationService`，已装配到发送验证码和手机号登录接口。
+`service.AliyunPhoneVerificationService`，已装配到发送验证码、手机号登录和已登录用户重置密码接口。
+重置密码原样复用发送能力及同一方案，验证码不区分登录与重置用途。
 
 ## 调用方式
 

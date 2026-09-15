@@ -1,5 +1,5 @@
 {
-  "env": "prod",
+  "env": "dev",
   "server": {
     "port": "9090"
   },

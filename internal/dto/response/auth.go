@@ -58,3 +58,8 @@ type AuthSecurityResponse struct {
 type DeleteMeResponse struct {
 	Deleted bool `json:"deleted"`
 }
+
+// ResetPasswordResponse defines the response for a completed password reset.
+type ResetPasswordResponse struct {
+	Reset bool `json:"reset"`
+}

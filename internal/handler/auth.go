@@ -337,6 +337,8 @@ func respondAuthError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	message := err.Error()
 	switch {
+	case errors.Is(err, service.ErrPasswordChanged):
+		status = http.StatusConflict
 	case errors.Is(err, service.ErrPhoneCodeRateLimited):
 		status = http.StatusTooManyRequests
 	case errors.Is(err, service.ErrPhoneVerificationUnavailable):

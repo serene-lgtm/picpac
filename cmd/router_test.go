@@ -245,6 +245,7 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/auth/refresh"},
 		{method: http.MethodPost, path: "/api/v1/auth/logout"},
 		{method: http.MethodPost, path: "/api/v1/auth/password/setup"},
+		{method: http.MethodPost, path: "/api/v1/auth/password/reset"},
 		{method: http.MethodPut, path: "/api/v1/auth/password"},
 		{method: http.MethodGet, path: "/api/v1/auth/security"},
 		{method: http.MethodDelete, path: "/api/v1/auth/me"},
@@ -275,4 +276,9 @@ func TestRegisterAPIRoutesDoesNotExposeLegacyPackUpdate(t *testing.T) {
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected legacy pack update route to be unregistered, got %d", recorder.Code)
 	}
+}
+
+// ResetPassword implements password reset for HTTP tests.
+func (s *fakeAuthService) ResetPassword(_ context.Context, _ service.ResetPasswordInput) error {
+	return nil
 }

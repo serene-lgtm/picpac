@@ -90,6 +90,7 @@ type RefreshTokenRepository interface {
 
 // UserPasswordCredentialRepository defines persistence behavior for password credentials.
 type UserPasswordCredentialRepository interface {
+	UpdatePasswordAndRevokeTokens(ctx context.Context, userID bson.ObjectID, expectedHash, passwordHash, passwordAlgo string, updatedAt time.Time) error
 	Create(ctx context.Context, credential *domain.UserPasswordCredential) error
 	GetByUserID(ctx context.Context, userID bson.ObjectID) (*domain.UserPasswordCredential, error)
 	RecordFailure(ctx context.Context, userID bson.ObjectID, failedAttemptCount int, lockedUntil *time.Time, updatedAt time.Time) error

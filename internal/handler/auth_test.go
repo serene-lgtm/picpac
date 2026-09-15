@@ -838,3 +838,8 @@ func TestAuthMiddlewareRejectsDeletedUser(t *testing.T) {
 		t.Fatalf("expected 401, got %d", recorder.Code)
 	}
 }
+
+// ResetPassword implements password reset for HTTP tests.
+func (s *fakeAuthService) ResetPassword(_ context.Context, _ service.ResetPasswordInput) error {
+	return nil
+}
