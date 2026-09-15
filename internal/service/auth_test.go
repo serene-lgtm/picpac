@@ -540,7 +540,7 @@ func TestGetSecurityReturnsMaskedPhoneAndPasswordSetup(t *testing.T) {
 	identities := &fakeAuthIdentityRepository{got: &domain.AuthIdentity{UserID: userID, Provider: domain.AuthProviderPhone, Identifier: "+8613800138000", Status: domain.AuthIdentityStatusActive}}
 	passwords := &fakeUserPasswordCredentialRepository{got: &domain.UserPasswordCredential{UserID: userID, PasswordHash: "hash", PasswordAlgo: passwordAlgorithmBcrypt}}
 	cfg := validAuthConfig()
-	svc := NewAuthService(users, identities, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, passwords, &fakeAuthUploadService{}, &recordingSMSService{}, NewTokenService(cfg.AccessTokenSecret, time.Duration(cfg.AccessTokenTTLSeconds)*time.Second), cfg)
+	svc := NewAuthService(users, identities, &fakeRefreshTokenRepository{}, passwords, &fakeAuthUploadService{}, &recordingPhoneVerificationService{}, NewTokenService(cfg.AccessTokenSecret, time.Duration(cfg.AccessTokenTTLSeconds)*time.Second), cfg, "prod")
 
 	security, err := svc.GetSecurity(context.Background(), userID.Hex())
 	if err != nil {
@@ -559,7 +559,7 @@ func TestGetSecurityReturnsFalseWhenPasswordMissing(t *testing.T) {
 	identities := &fakeAuthIdentityRepository{got: &domain.AuthIdentity{UserID: userID, Provider: domain.AuthProviderPhone, Identifier: "+8613800138000", Status: domain.AuthIdentityStatusActive}}
 	passwords := &fakeUserPasswordCredentialRepository{}
 	cfg := validAuthConfig()
-	svc := NewAuthService(users, identities, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, passwords, &fakeAuthUploadService{}, &recordingSMSService{}, NewTokenService(cfg.AccessTokenSecret, time.Duration(cfg.AccessTokenTTLSeconds)*time.Second), cfg)
+	svc := NewAuthService(users, identities, &fakeRefreshTokenRepository{}, passwords, &fakeAuthUploadService{}, &recordingPhoneVerificationService{}, NewTokenService(cfg.AccessTokenSecret, time.Duration(cfg.AccessTokenTTLSeconds)*time.Second), cfg, "prod")
 
 	security, err := svc.GetSecurity(context.Background(), userID.Hex())
 	if err != nil {
@@ -577,7 +577,7 @@ func TestGetSecurityAllowsMissingPhoneIdentity(t *testing.T) {
 	users := &fakeUserRepository{got: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusCreated}}
 	passwords := &fakeUserPasswordCredentialRepository{got: &domain.UserPasswordCredential{UserID: userID, PasswordHash: "hash", PasswordAlgo: passwordAlgorithmBcrypt}}
 	cfg := validAuthConfig()
-	svc := NewAuthService(users, &fakeAuthIdentityRepository{}, &fakePhoneCodeRepository{}, &fakeRefreshTokenRepository{}, passwords, &fakeAuthUploadService{}, &recordingSMSService{}, NewTokenService(cfg.AccessTokenSecret, time.Duration(cfg.AccessTokenTTLSeconds)*time.Second), cfg)
+	svc := NewAuthService(users, &fakeAuthIdentityRepository{}, &fakeRefreshTokenRepository{}, passwords, &fakeAuthUploadService{}, &recordingPhoneVerificationService{}, NewTokenService(cfg.AccessTokenSecret, time.Duration(cfg.AccessTokenTTLSeconds)*time.Second), cfg, "prod")
 
 	security, err := svc.GetSecurity(context.Background(), userID.Hex())
 	if err != nil {

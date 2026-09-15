@@ -672,6 +672,17 @@ func normalizePhone(value string) (string, error) {
 	return "+86" + phone, nil
 }
 
+func maskPhone(phone string) string {
+	phone = strings.TrimSpace(phone)
+	if strings.HasPrefix(phone, "+86") && len(phone) == 14 {
+		return phone[3:6] + "****" + phone[10:]
+	}
+	if len(phone) <= 7 {
+		return phone
+	}
+	return phone[:3] + "****" + phone[len(phone)-4:]
+}
+
 func newDefaultUsername(phone string) string {
 	return "user" + digitsOnly(phone)
 }
