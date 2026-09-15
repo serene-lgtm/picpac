@@ -73,6 +73,7 @@ type AuthService interface {
 	Logout(ctx context.Context, input request.LogoutInput) error
 	SetupPassword(ctx context.Context, input request.SetupPasswordInput) error
 	ChangePassword(ctx context.Context, input request.ChangePasswordInput) error
+	GetSecurity(ctx context.Context, userID string) (*domain.AuthSecurity, error)
 	Me(ctx context.Context, userID string) (*domain.User, error)
 	UpdateMyProfile(ctx context.Context, userID string, input request.UpdateMyProfileInput) (*domain.User, error)
 	DeleteMe(ctx context.Context, userID string) error
@@ -416,6 +417,41 @@ func (s *authService) ChangePassword(ctx context.Context, input request.ChangePa
 	return nil
 }
 
+// GetSecurity returns the current user's account security status.
+func (s *authService) GetSecurity(ctx context.Context, userID string) (*domain.AuthSecurity, error) {
+	objectID, err := parseObjectID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input")
+	}
+
+	if _, err := s.getActiveUserByID(ctx, objectID); err != nil {
+		return nil, err
+	}
+
+	security := &domain.AuthSecurity{}
+	identity, err := s.identities.GetByUserIDAndProvider(ctx, objectID, domain.AuthProviderPhone)
+	if err != nil {
+		if !errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("get phone identity failed: %w", err)
+		}
+	} else {
+		security.Phone = maskPhone(identity.Identifier)
+	}
+
+	if s.passwords == nil {
+		return nil, fmt.Errorf("password credential repository is not configured")
+	}
+	if _, err := s.passwords.GetByUserID(ctx, objectID); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return security, nil
+		}
+		return nil, fmt.Errorf("get password credential failed: %w", err)
+	}
+	security.PasswordSetup = true
+
+	return security, nil
+}
+
 // Me returns the current user.
 func (s *authService) Me(ctx context.Context, userID string) (*domain.User, error) {
 	objectID, err := parseObjectID(userID)
@@ -634,6 +670,17 @@ func normalizePhone(value string) (string, error) {
 		return "", fmt.Errorf("phone is invalid")
 	}
 	return "+86" + phone, nil
+}
+
+func maskPhone(phone string) string {
+	phone = strings.TrimSpace(phone)
+	if strings.HasPrefix(phone, "+86") && len(phone) == 14 {
+		return phone[3:6] + "****" + phone[10:]
+	}
+	if len(phone) <= 7 {
+		return phone
+	}
+	return phone[:3] + "****" + phone[len(phone)-4:]
 }
 
 func newDefaultUsername(phone string) string {

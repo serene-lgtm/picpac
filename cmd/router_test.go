@@ -163,6 +163,10 @@ func (s *fakeAuthService) ChangePassword(_ context.Context, _ request.ChangePass
 	return nil
 }
 
+func (s *fakeAuthService) GetSecurity(_ context.Context, _ string) (*domain.AuthSecurity, error) {
+	return &domain.AuthSecurity{Phone: "138****8888", PasswordSetup: true}, nil
+}
+
 func (s *fakeAuthService) Me(_ context.Context, _ string) (*domain.User, error) {
 	return &domain.User{ID: bson.NewObjectID(), Profile: domain.UserProfile{Username: "user", AvatarObjectKey: "user-avatar/default.jpg"}, Status: domain.UserStatusCreated}, nil
 }
@@ -242,6 +246,7 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/auth/logout"},
 		{method: http.MethodPost, path: "/api/v1/auth/password/setup"},
 		{method: http.MethodPut, path: "/api/v1/auth/password"},
+		{method: http.MethodGet, path: "/api/v1/auth/security"},
 		{method: http.MethodDelete, path: "/api/v1/auth/me"},
 		{method: http.MethodGet, path: "/api/v1/me"},
 		{method: http.MethodPut, path: "/api/v1/me/profile"},

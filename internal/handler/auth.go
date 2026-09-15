@@ -228,6 +228,26 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	c.JSON(http.StatusOK, response.ChangePasswordResponse{Changed: true})
 }
 
+// GetSecurity handles account security status requests.
+func (h *AuthHandler) GetSecurity(c *gin.Context) {
+	userID, ok := CurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	security, err := h.svc.GetSecurity(c.Request.Context(), userID)
+	if err != nil {
+		respondAuthError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response.AuthSecurityResponse{
+		Phone:         security.Phone,
+		PasswordSetup: security.PasswordSetup,
+	})
+}
+
 // Me handles current user requests.
 func (h *AuthHandler) Me(c *gin.Context) {
 	userID, ok := CurrentUserID(c)

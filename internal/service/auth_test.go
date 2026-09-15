@@ -86,6 +86,16 @@ func (r *fakeAuthIdentityRepository) GetByProviderAndIdentifier(_ context.Contex
 	return r.got, nil
 }
 
+func (r *fakeAuthIdentityRepository) GetByUserIDAndProvider(_ context.Context, _ bson.ObjectID, _ domain.AuthProvider) (*domain.AuthIdentity, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	if r.got == nil {
+		return nil, mongo.ErrNoDocuments
+	}
+	return r.got, nil
+}
+
 func (r *fakeAuthIdentityRepository) DisableByUserID(_ context.Context, userID bson.ObjectID, _ time.Time) error {
 	if r.err != nil {
 		return r.err
@@ -519,6 +529,62 @@ func TestLoginWithPhonePasswordRejectsMissingCredential(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "phone or password is invalid") {
 		t.Fatalf("expected invalid password login error, got %v", err)
+	}
+}
+
+func TestGetSecurityReturnsMaskedPhoneAndPasswordSetup(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusCreated}}
+	identities := &fakeAuthIdentityRepository{got: &domain.AuthIdentity{UserID: userID, Provider: domain.AuthProviderPhone, Identifier: "+8613800138000", Status: domain.AuthIdentityStatusActive}}
+	passwords := &fakeUserPasswordCredentialRepository{got: &domain.UserPasswordCredential{UserID: userID, PasswordHash: "hash", PasswordAlgo: passwordAlgorithmBcrypt}}
+	cfg := validAuthConfig()
+	svc := NewAuthService(users, identities, &fakeRefreshTokenRepository{}, passwords, &fakeAuthUploadService{}, &recordingPhoneVerificationService{}, NewTokenService(cfg.AccessTokenSecret, time.Duration(cfg.AccessTokenTTLSeconds)*time.Second), cfg, "prod")
+
+	security, err := svc.GetSecurity(context.Background(), userID.Hex())
+	if err != nil {
+		t.Fatalf("GetSecurity returned error: %v", err)
+	}
+	if security.Phone != "138****8000" || !security.PasswordSetup {
+		t.Fatalf("unexpected security response: %+v", security)
+	}
+}
+
+func TestGetSecurityReturnsFalseWhenPasswordMissing(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusCreated}}
+	identities := &fakeAuthIdentityRepository{got: &domain.AuthIdentity{UserID: userID, Provider: domain.AuthProviderPhone, Identifier: "+8613800138000", Status: domain.AuthIdentityStatusActive}}
+	passwords := &fakeUserPasswordCredentialRepository{}
+	cfg := validAuthConfig()
+	svc := NewAuthService(users, identities, &fakeRefreshTokenRepository{}, passwords, &fakeAuthUploadService{}, &recordingPhoneVerificationService{}, NewTokenService(cfg.AccessTokenSecret, time.Duration(cfg.AccessTokenTTLSeconds)*time.Second), cfg, "prod")
+
+	security, err := svc.GetSecurity(context.Background(), userID.Hex())
+	if err != nil {
+		t.Fatalf("GetSecurity returned error: %v", err)
+	}
+	if security.Phone != "138****8000" || security.PasswordSetup {
+		t.Fatalf("unexpected security response: %+v", security)
+	}
+}
+
+func TestGetSecurityAllowsMissingPhoneIdentity(t *testing.T) {
+	t.Parallel()
+
+	userID := bson.NewObjectID()
+	users := &fakeUserRepository{got: &domain.User{ID: userID, Profile: domain.UserProfile{Username: "用户8000", AvatarObjectKey: defaultUserAvatarObjectKey}, Status: domain.UserStatusCreated}}
+	passwords := &fakeUserPasswordCredentialRepository{got: &domain.UserPasswordCredential{UserID: userID, PasswordHash: "hash", PasswordAlgo: passwordAlgorithmBcrypt}}
+	cfg := validAuthConfig()
+	svc := NewAuthService(users, &fakeAuthIdentityRepository{}, &fakeRefreshTokenRepository{}, passwords, &fakeAuthUploadService{}, &recordingPhoneVerificationService{}, NewTokenService(cfg.AccessTokenSecret, time.Duration(cfg.AccessTokenTTLSeconds)*time.Second), cfg, "prod")
+
+	security, err := svc.GetSecurity(context.Background(), userID.Hex())
+	if err != nil {
+		t.Fatalf("GetSecurity returned error: %v", err)
+	}
+	if security.Phone != "" || !security.PasswordSetup {
+		t.Fatalf("unexpected security response: %+v", security)
 	}
 }
 
