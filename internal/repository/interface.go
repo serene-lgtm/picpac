@@ -80,15 +80,6 @@ type AuthIdentityRepository interface {
 	DisableByUserID(ctx context.Context, userID bson.ObjectID, disabledAt time.Time) error
 }
 
-// PhoneVerificationCodeRepository defines persistence behavior for phone verification codes.
-type PhoneVerificationCodeRepository interface {
-	Create(ctx context.Context, code *domain.PhoneVerificationCode) error
-	GetLatestActive(ctx context.Context, phone string, purpose domain.PhoneVerificationPurpose, now time.Time) (*domain.PhoneVerificationCode, error)
-	MarkConsumed(ctx context.Context, codeID bson.ObjectID, consumedAt time.Time) error
-	IncrementAttempt(ctx context.Context, codeID bson.ObjectID) error
-	CountRecent(ctx context.Context, phone string, since time.Time) (int64, error)
-}
-
 // RefreshTokenRepository defines persistence behavior for refresh tokens.
 type RefreshTokenRepository interface {
 	Create(ctx context.Context, token *domain.RefreshToken) error

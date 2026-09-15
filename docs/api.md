@@ -39,20 +39,32 @@ OSS object key 约定：
 
 ## Formal APIs
 
+认证接口失败响应沿用 `{"error":"<message>"}` 格式，前端优先按 HTTP 状态码处理。
+验证码接口的公共错误如下，响应不会包含阿里云内部错误信息：
+
+| HTTP | `error` | 含义 |
+|---|---|---|
+| `400` | `invalid input` | JSON 格式错误 |
+| `400` | `phone is required` | 缺少手机号 |
+| `400` | `phone is invalid` | 手机号格式错误 |
+| `400` | `code is required` | 缺少验证码，仅登录接口 |
+| `400` | `phone code is invalid` | 验证码格式错误、错误或失效，仅登录接口 |
+| `429` | `phone code send too frequently` | 发送过于频繁，仅发送接口 |
+| `502` | `phone verification service is unavailable` | 验证码供应商暂时不可用 |
+
 ### Send Phone Code
 
 `POST /api/v1/auth/phone/code`
 
 用途：
 - 发送手机号登录验证码
-- 当前开发配置可使用固定验证码，生产环境必须接真实短信服务
-- 同一手机号会受到重发间隔和每日发送次数限制
+- `prod` 调用阿里云号码认证；`dev` 直接成功且不发送短信
 
 请求类型：
 - `application/json`
 
 请求字段：
-- `phone`: string，必填。中国大陆11位手机号会标准化为 `+86` 格式；也支持传入带 `+` 的国际号码
+- `phone`: string，必填。仅支持中国大陆 11 位手机号或带 `+86` 前缀的同一号码，后端统一存为 `+86` 格式
 
 请求示例：
 
@@ -70,10 +82,10 @@ OSS object key 约定：
 }
 ```
 
+`sent: true` 表示阿里云已接受发送请求，不代表运营商已确认短信送达。
+
 失败响应：
-- `400`: 缺少 `phone`，或手机号格式非法
-- `429`: 验证码发送过于频繁
-- `500`: 创建验证码或发送验证码失败
+- 见上方公共错误表；本接口可能返回 `400`、`429`、`502`
 
 ### Phone Code Login
 
@@ -81,6 +93,7 @@ OSS object key 约定：
 
 用途：
 - 使用手机号和验证码登录
+- `dev` 使用 `auth.phone_code.dev_fixed_code`（默认 `123456`）；`prod` 使用短信中的验证码
 - 首次手机号登录会自动创建 `User` 和 `AuthIdentity(provider=phone)`
 - 已存在手机号会复用原 User
 - 旧路径 `POST /api/v1/auth/phone/login` 暂时保留兼容，语义与本接口一致
@@ -89,8 +102,8 @@ OSS object key 约定：
 - `application/json`
 
 请求字段：
-- `phone`: string，必填
-- `code`: string，必填
+- `phone`: string，必填。仅支持中国大陆 11 位手机号或带 `+86` 前缀的同一号码
+- `code`: string，必填。6 位 ASCII 数字；dev 使用 `auth.phone_code.dev_fixed_code`，prod 使用实际短信中的验证码
 
 请求示例：
 
@@ -122,7 +135,7 @@ OSS object key 约定：
 ```
 
 失败响应：
-- `400`: 缺少 `phone`、缺少 `code`、手机号格式非法、验证码非法或超过尝试次数
+- 验证码相关错误见上方公共错误表；本接口可能返回 `400`、`502`
 - `404`: 已绑定身份对应的 User 不存在
 - `409`: 创建登录身份发生冲突且无法恢复
 - `500`: 创建 User、AuthIdentity、token 或生成头像访问 URL 失败

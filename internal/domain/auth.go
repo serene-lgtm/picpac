@@ -30,23 +30,6 @@ const (
 	AuthIdentityStatusDisabled AuthIdentityStatus = "disabled"
 )
 
-type PhoneVerificationCode struct {
-	ID           bson.ObjectID            `json:"id"`
-	Phone        string                   `json:"phone"`
-	CodeHash     string                   `json:"code_hash"`
-	Purpose      PhoneVerificationPurpose `json:"purpose"`
-	ExpiresAt    time.Time                `json:"expires_at"`
-	ConsumedAt   *time.Time               `json:"consumed_at"`
-	AttemptCount int                      `json:"attempt_count"`
-	CreatedAt    time.Time                `json:"created_at"`
-}
-
-type PhoneVerificationPurpose string
-
-const (
-	PhoneVerificationPurposeLogin PhoneVerificationPurpose = "login"
-)
-
 type RefreshToken struct {
 	ID        bson.ObjectID `json:"id"`
 	UserID    bson.ObjectID `json:"user_id"`

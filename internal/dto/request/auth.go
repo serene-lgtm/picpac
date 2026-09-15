@@ -4,13 +4,13 @@ import "io"
 
 // SendPhoneCodeInput defines the input for sending a phone login code.
 type SendPhoneCodeInput struct {
-	Phone string `json:"phone"`
+	Phone string `json:"phone" binding:"required"`
 }
 
 // PhoneLoginInput defines the input for phone login.
 type PhoneLoginInput struct {
-	Phone string `json:"phone"`
-	Code  string `json:"code"`
+	Phone string `json:"phone" binding:"required"`
+	Code  string `json:"code" binding:"required,len=6,numeric"`
 }
 
 // PhonePasswordLoginInput defines the input for phone password login.
