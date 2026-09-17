@@ -66,6 +66,7 @@ type RefreshResult struct {
 
 // AuthService defines authentication behavior.
 type AuthService interface {
+	PatchMyProfile(ctx context.Context, userID string, input ProfilePatchInput) (*domain.User, error)
 	ResetPassword(ctx context.Context, input ResetPasswordInput) error
 	SendPhoneCode(ctx context.Context, input request.SendPhoneCodeInput) error
 	LoginWithPhone(ctx context.Context, input request.PhoneLoginInput) (*AuthResult, error)
@@ -81,6 +82,7 @@ type AuthService interface {
 }
 
 type authService struct {
+	profileUpload   config.ProfileUploadConfig
 	users           repository.UserRepository
 	identities      repository.AuthIdentityRepository
 	refreshTokens   repository.RefreshTokenRepository
@@ -111,6 +113,7 @@ func NewAuthService(
 		devFixedCode = "123456"
 	}
 	return &authService{
+		profileUpload:   authConfig.ProfileUpload.WithDefaults(),
 		users:           users,
 		identities:      identities,
 		refreshTokens:   refreshTokens,
@@ -465,64 +468,10 @@ func (s *authService) Me(ctx context.Context, userID string) (*domain.User, erro
 
 // UpdateMyProfile updates the current user profile.
 func (s *authService) UpdateMyProfile(ctx context.Context, userID string, input request.UpdateMyProfileInput) (*domain.User, error) {
-	objectID, err := parseObjectID(userID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid input")
-	}
-
-	user, err := s.getActiveUserByID(ctx, objectID)
-	if err != nil {
-		return nil, err
-	}
-
-	username := strings.TrimSpace(input.Username)
-	if username == "" {
-		return nil, fmt.Errorf("username is required")
-	}
-	if len([]rune(username)) > 32 {
-		return nil, fmt.Errorf("username is too long")
-	}
-
-	gender, err := parseRequiredUserGender(input.Gender)
-	if err != nil {
-		return nil, err
-	}
-
-	birthday, err := parseOptionalBirthday(input.Birthday)
-	if err != nil {
-		return nil, err
-	}
-
-	avatarObjectKey := strings.TrimSpace(user.Profile.AvatarObjectKey)
-	avatarDisplayObjectKey := strings.TrimSpace(user.Profile.AvatarDisplayObjectKey)
-	if input.File != nil {
-		avatarObjectKey, avatarDisplayObjectKey, err = s.uploadUserAvatar(ctx, user.ID, input.FileName, input.File)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if avatarObjectKey == "" {
-		return nil, fmt.Errorf("avatar is required")
-	}
-	if avatarDisplayObjectKey == "" {
-		avatarDisplayObjectKey = avatarObjectKey
-	}
-
-	user.Profile.Username = username
-	user.Profile.Gender = gender
-	user.Profile.Birthday = birthday
-	user.Profile.AvatarObjectKey = avatarObjectKey
-	user.Profile.AvatarDisplayObjectKey = avatarDisplayObjectKey
-	user.UpdatedAt = time.Now().UTC()
-
-	if err := s.users.Update(ctx, user); err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, fmt.Errorf("user not found")
-		}
-		return nil, fmt.Errorf("update user profile failed: %w", err)
-	}
-
-	return user, nil
+	return s.PatchMyProfile(ctx, userID, ProfilePatchInput{
+		Username: &input.Username, Gender: &input.Gender, Birthday: &input.Birthday,
+		File: input.File, FileName: input.FileName,
+	})
 }
 
 // DeleteMe deletes the current user account logically.
@@ -685,7 +634,11 @@ func maskPhone(phone string) string {
 }
 
 func newDefaultUsername(phone string) string {
-	return "user" + digitsOnly(phone)
+	digits := digitsOnly(phone)
+	if len(digits) > 4 {
+		digits = digits[len(digits)-4:]
+	}
+	return "picpacker_" + digits
 }
 
 func (s *authService) hashPassword(password string) (string, error) {

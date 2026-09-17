@@ -95,6 +95,7 @@ OSS object key 约定：
 - 使用手机号和验证码登录
 - `dev` 使用 `auth.phone_code.dev_fixed_code`（默认 `123456`）；`prod` 使用短信中的验证码
 - 首次手机号登录会自动创建 `User` 和 `AuthIdentity(provider=phone)`
+- 新用户默认用户名为 `picpacker_` 加手机号后四位，例如 `13800138000` → `picpacker_8000`；不保证唯一，已有用户名不会自动改写
 - 已存在手机号会复用原 User
 - 旧路径 `POST /api/v1/auth/phone/login` 暂时保留兼容，语义与本接口一致
 
@@ -123,7 +124,7 @@ OSS object key 约定：
   "user": {
     "id": "6821c0c1f1b2f4d5a6b7c8d1",
     "profile": {
-      "username": "user8613800138000",
+      "username": "picpacker_8000",
       "gender": "",
       "birthday": "",
       "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/users/default/avatar.png?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
@@ -178,7 +179,7 @@ OSS object key 约定：
   "user": {
     "id": "6821c0c1f1b2f4d5a6b7c8d1",
     "profile": {
-      "username": "user8613800138000",
+      "username": "picpacker_8000",
       "gender": "",
       "birthday": "",
       "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/users/default/avatar.png?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
@@ -437,7 +438,7 @@ OSS object key 约定：
 {
   "id": "6821c0c1f1b2f4d5a6b7c8d1",
   "profile": {
-    "username": "user8613800138000",
+    "username": "picpacker_8000",
     "gender": "",
     "birthday": "",
     "avatar_url": "https://picpac.oss-cn-shanghai.aliyuncs.com/users/default/avatar.png?Expires=1783588103&OSSAccessKeyId=...&Signature=...",
@@ -452,9 +453,12 @@ OSS object key 约定：
 - `404`: User 不存在
 - `500`: 查询 User 或生成头像访问 URL 失败
 
-### Update My Profile
+### Update My Profile (Legacy PUT)
 
 `PUT /api/v1/me/profile`
+
+为旧客户端保留。`username`、`gender` 仍必填；`birthday` 未传或传空都会清空生日。新版前端建议使用下方 PATCH。
+头像大小和像素数限制与 PATCH 相同，超限返回 `413`；未知字段、重复字段和损坏的 multipart 请求返回 `400`。
 
 用途：
 - 更新当前登录用户的 profile
@@ -501,6 +505,46 @@ OSS object key 约定：
 - `404`: User 不存在
 - `502`: 上传头像到 OSS 失败
 - `500`: 更新用户资料或生成头像访问 URL 失败
+
+### Patch My Profile
+
+`PATCH /api/v1/me/profile`
+
+更新当前登录用户实际提交的资料字段；请求头为 `Authorization: Bearer <access_token>`，请求类型为 `multipart/form-data`（由客户端库生成 boundary）。不接受用户 ID，由登录身份确定用户。
+
+| 字段 | 类型 | 未传 | 传入 |
+| --- | --- | --- | --- |
+| `username` | string | 保持原值 | 去首尾空格后 1–32 字符，空字符串非法 |
+| `gender` | string | 保持原值 | `male`、`female`、`private`，空字符串非法 |
+| `birthday` | string | 保持原值 | `YYYY-MM-DD`；空字符串清空生日 |
+| `avatar` | 图片文件 | 保留头像，不上传 OSS | 校验并上传新原图及展示图 |
+
+至少提交一个上述字段；空请求、未知字段、重复字段、多张头像、损坏的 multipart、以普通文本提交 avatar 均返回 `400`。所有输入校验通过后才上传头像。前端仅在用户重新选择头像时提交文件；相同图片再次提交仍会上传。
+
+头像限制由 `auth.profile_upload.max_bytes` 和 `auth.profile_upload.max_pixels` 配置，未配置或非正数采用默认值：5 MiB（5242880 bytes）及 2000 万像素。整个 multipart 请求最多为头像字节上限加 1 MiB。当前支持可解码的 JPEG、PNG、GIF；展示图为 JPEG。字节数和尺寸在完整解码前检查，超限返回 `413`。PUT 同样适用。
+
+示例：仅修改用户名。
+
+```bash
+curl -X PATCH 'http://localhost:9090/api/v1/me/profile' \
+  -H 'Authorization: Bearer <access_token>' \
+  -F 'username=新的用户名'
+```
+
+仅清空生日：`birthday=`；只更换头像：提交 `avatar` 文件，无需携带其他字段。
+
+成功返回 `200`，响应为与 PUT 相同的完整用户对象：`id`、`profile`（`username`、`gender`、`birthday`、`avatar_url`、`avatar_source_url`）、`status`。前端直接刷新本地资料，无需再查询；URL 为有时效的签名 URL。
+
+失败响应：
+- `400`：空请求、请求格式、字段值或图片非法。
+- `401`：未登录或 access token 无效。
+- `403`：用户已禁用。
+- `404`：用户不存在、已删除或写入时已不处于可更新状态。
+- `413`：请求、头像文件或图片像素数超过限制。
+- `502`：OSS 上传失败。
+- `500`：数据库更新或头像 URL 生成失败。
+
+存储采用字段级更新，不会用旧 User 文档覆盖其他字段；同一字段并发修改以后写入为准。头像路径保持不变，OSS 和 MongoDB 不存在跨系统事务：上传覆盖成功后数据库失败，或原图上传后展示图上传失败，已有云端对象可能已经变化。该版本不新增头像删除、默认头像恢复或旧对象清理。
 
 ### List Categories
 
