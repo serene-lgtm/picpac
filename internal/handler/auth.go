@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"pack_mate/internal/config"
 	"pack_mate/internal/domain"
 	"pack_mate/internal/dto/request"
 	"pack_mate/internal/dto/response"
@@ -25,13 +26,18 @@ const (
 
 // AuthHandler handles auth HTTP requests.
 type AuthHandler struct {
-	svc       service.AuthService
-	urlSigner service.ObjectURLSigner
+	profileUpload config.ProfileUploadConfig
+	svc           service.AuthService
+	urlSigner     service.ObjectURLSigner
 }
 
 // NewAuthHandler creates an auth handler.
-func NewAuthHandler(svc service.AuthService, urlSigner service.ObjectURLSigner) *AuthHandler {
-	return &AuthHandler{svc: svc, urlSigner: urlSigner}
+func NewAuthHandler(svc service.AuthService, urlSigner service.ObjectURLSigner, limits ...config.ProfileUploadConfig) *AuthHandler {
+	cfg := config.ProfileUploadConfig{}.WithDefaults()
+	if len(limits) > 0 {
+		cfg = limits[0].WithDefaults()
+	}
+	return &AuthHandler{svc: svc, urlSigner: urlSigner, profileUpload: cfg}
 }
 
 // SendPhoneCode handles phone code sending requests.
@@ -279,27 +285,29 @@ func (h *AuthHandler) UpdateMyProfile(c *gin.Context) {
 		return
 	}
 
-	username := strings.TrimSpace(c.PostForm("username"))
-	gender := strings.TrimSpace(c.PostForm("gender"))
-	birthday := strings.TrimSpace(c.PostForm("birthday"))
-	if username == "" {
+	patch, cleanup, err := h.parseProfileForm(c)
+	defer cleanup()
+	if err != nil {
+		respondProfileInputError(c, err)
+		return
+	}
+	input := request.UpdateMyProfileInput{File: patch.File, FileName: patch.FileName}
+	if patch.Username != nil {
+		input.Username = *patch.Username
+	}
+	if patch.Gender != nil {
+		input.Gender = *patch.Gender
+	}
+	if patch.Birthday != nil {
+		input.Birthday = *patch.Birthday
+	}
+	if strings.TrimSpace(input.Username) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
 		return
 	}
-	if gender == "" {
+	if strings.TrimSpace(input.Gender) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "gender is required"})
 		return
-	}
-
-	input := request.UpdateMyProfileInput{
-		Username: username,
-		Gender:   gender,
-		Birthday: birthday,
-	}
-	if file, header, err := c.Request.FormFile("avatar"); err == nil {
-		defer file.Close()
-		input.File = file
-		input.FileName = header.Filename
 	}
 
 	user, err := h.svc.UpdateMyProfile(c.Request.Context(), userID, input)
@@ -337,6 +345,10 @@ func respondAuthError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	message := err.Error()
 	switch {
+	case errors.Is(err, service.ErrAvatarTooLarge):
+		status = http.StatusRequestEntityTooLarge
+	case errors.Is(err, service.ErrEmptyProfilePatch):
+		status = http.StatusBadRequest
 	case errors.Is(err, service.ErrPasswordChanged):
 		status = http.StatusConflict
 	case errors.Is(err, service.ErrPhoneCodeRateLimited):

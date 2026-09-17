@@ -843,3 +843,8 @@ func TestAuthMiddlewareRejectsDeletedUser(t *testing.T) {
 func (s *fakeAuthService) ResetPassword(_ context.Context, _ service.ResetPasswordInput) error {
 	return nil
 }
+
+// PatchMyProfile implements profile patching for HTTP tests.
+func (s *fakeAuthService) PatchMyProfile(_ context.Context, _ string, _ service.ProfilePatchInput) (*domain.User, error) {
+	return &domain.User{}, nil
+}

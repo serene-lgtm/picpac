@@ -46,7 +46,7 @@ func newRouter(cfg *config.Configuration, bucket *oss.Bucket, db *mongo.Database
 	itemDraftExtractionAgent := agent.NewChatItemDraftExtractionAgent(chatClient)
 	aiSuggestionService := service.NewAISuggestionService(itemService, categoryService, recommendationAgent, itemDraftExtractionAgent)
 
-	registerAPIRoutes(router, itemService, packService, checklistService, categoryService, aiSuggestionService, authService, tokenService, uploadService)
+	registerAPIRoutes(router, itemService, packService, checklistService, categoryService, aiSuggestionService, authService, tokenService, uploadService, cfg.Auth.ProfileUpload)
 
 	return router, nil
 }
@@ -61,13 +61,13 @@ func newPhoneVerificationService(cfg *config.Configuration) (service.PhoneVerifi
 	return service.NewAliyunPhoneVerificationService(cfg.Auth.PhoneCode)
 }
 
-func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService, checklistService service.ChecklistService, categoryService service.CategoryService, aiSuggestionService service.AISuggestionService, authService service.AuthService, tokenService service.TokenService, objectURLSigner service.ObjectURLSigner) {
+func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, packService service.PackService, checklistService service.ChecklistService, categoryService service.CategoryService, aiSuggestionService service.AISuggestionService, authService service.AuthService, tokenService service.TokenService, objectURLSigner service.ObjectURLSigner, profileLimits ...config.ProfileUploadConfig) {
 	itemHandler := handler.NewItemHandler(itemService, categoryService, objectURLSigner)
 	packHandler := handler.NewPackHandler(packService)
 	checklistHandler := handler.NewChecklistHandler(checklistService)
 	categoryHandler := handler.NewCategoryHandler(categoryService)
 	aiHandler := handler.NewAIHandler(aiSuggestionService)
-	authHandler := handler.NewAuthHandler(authService, objectURLSigner)
+	authHandler := handler.NewAuthHandler(authService, objectURLSigner, profileLimits...)
 	authMiddleware := handler.NewAuthMiddleware(tokenService, authService)
 
 	router.GET("/api/v1/categories", categoryHandler.ListCategories)
@@ -85,6 +85,7 @@ func registerAPIRoutes(router *gin.Engine, itemService service.ItemService, pack
 	authRoutes.GET("/security", authMiddleware.RequireAuth(), authHandler.GetSecurity)
 	authRoutes.DELETE("/me", authMiddleware.RequireAuth(), authHandler.DeleteMe)
 	router.GET("/api/v1/me", authMiddleware.RequireAuth(), authHandler.Me)
+	router.PATCH("/api/v1/me/profile", authMiddleware.RequireAuth(), authHandler.PatchMyProfile)
 	router.PUT("/api/v1/me/profile", authMiddleware.RequireAuth(), authHandler.UpdateMyProfile)
 
 	aiRoutes := router.Group("/api/v1/ai")

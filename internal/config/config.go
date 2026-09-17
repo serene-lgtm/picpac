@@ -73,11 +73,12 @@ type MongoConfig struct {
 
 // AuthConfig defines authentication settings.
 type AuthConfig struct {
-	AccessTokenSecret      string           `json:"access_token_secret"`
-	AccessTokenTTLSeconds  int              `json:"access_token_ttl_seconds"`
-	RefreshTokenTTLSeconds int              `json:"refresh_token_ttl_seconds"`
-	PhoneCode              AliyunPNVSConfig `json:"phone_code"`
-	Password               PasswordConfig   `json:"password"`
+	ProfileUpload          ProfileUploadConfig `json:"profile_upload"`
+	AccessTokenSecret      string              `json:"access_token_secret"`
+	AccessTokenTTLSeconds  int                 `json:"access_token_ttl_seconds"`
+	RefreshTokenTTLSeconds int                 `json:"refresh_token_ttl_seconds"`
+	PhoneCode              AliyunPNVSConfig    `json:"phone_code"`
+	Password               PasswordConfig      `json:"password"`
 }
 
 // PasswordConfig defines password credential settings.

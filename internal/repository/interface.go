@@ -67,6 +67,7 @@ type ChecklistRepository interface {
 
 // UserRepository defines persistence behavior for users.
 type UserRepository interface {
+	PatchProfile(ctx context.Context, userID bson.ObjectID, patch UserProfilePatch, updatedAt time.Time) (*domain.User, error)
 	Create(ctx context.Context, user *domain.User) error
 	GetByID(ctx context.Context, userID bson.ObjectID) (*domain.User, error)
 	Update(ctx context.Context, user *domain.User) error

@@ -340,8 +340,8 @@ func TestLoginWithPhoneCreatesUserOnFirstLogin(t *testing.T) {
 	if users.created == nil {
 		t.Fatalf("expected user to be created")
 	}
-	if users.created.Profile.Username != "user8613800138000" {
-		t.Fatalf("expected default username user8613800138000, got %+v", users.created.Profile)
+	if users.created.Profile.Username != "picpacker_8000" {
+		t.Fatalf("expected default username picpacker_8000, got %+v", users.created.Profile)
 	}
 	if users.created.Profile.AvatarObjectKey != defaultUserAvatarObjectKey {
 		t.Fatalf("expected default avatar object key %s, got %s", defaultUserAvatarObjectKey, users.created.Profile.AvatarObjectKey)
