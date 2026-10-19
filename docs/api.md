@@ -52,6 +52,52 @@ OSS object key 约定：
 | `429` | `phone code send too frequently` | 发送过于频繁，仅发送接口 |
 | `502` | `phone verification service is unavailable` | 验证码供应商暂时不可用 |
 
+### Health
+
+`GET /health`
+
+检查 HTTP 服务进程是否仍然可以处理请求。不需要登录，也不检查 MongoDB 或其他外部依赖。
+
+成功响应：
+
+```json
+{
+  "status": "ok"
+}
+```
+
+返回 `200` 表示进程存活。
+
+### Ready
+
+`GET /ready`
+
+检查服务是否已经准备好接收业务请求。目前检查 MongoDB 连接状态，不需要登录。
+
+依赖正常时返回 `200`：
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "mongodb": "ok"
+  }
+}
+```
+
+MongoDB 不可用或检查超时时返回 `503`：
+
+```json
+{
+  "status": "not_ready",
+  "checks": {
+    "mongodb": "unavailable"
+  }
+}
+```
+
+部署平台可以将 `/health` 用作存活检查，将 `/ready` 用作就绪检查。响应不会暴露数据库连接信息。
+
 ### Send Phone Code
 
 `POST /api/v1/auth/phone/code`

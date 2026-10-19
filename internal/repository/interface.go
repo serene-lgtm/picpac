@@ -9,6 +9,11 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+// HealthRepository defines dependency health checks.
+type HealthRepository interface {
+	Ping(ctx context.Context) error
+}
+
 // CategoryRepository defines persistence behavior for system categories.
 type CategoryRepository interface {
 	ListAll(ctx context.Context) ([]domain.Category, error)
