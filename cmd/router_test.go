@@ -137,6 +137,14 @@ type fakeAuthService struct{}
 
 type fakeLaunchScreenService struct{}
 
+type fakeHealthService struct{}
+
+// Health returns a successful liveness result for route tests.
+func (s *fakeHealthService) Health(context.Context) error { return nil }
+
+// Ready returns a successful readiness result for route tests.
+func (s *fakeHealthService) Ready(context.Context) error { return nil }
+
 // Get returns a disabled launch screen for route tests.
 func (s *fakeLaunchScreenService) Get(_ context.Context) (*domain.LaunchScreen, error) {
 	return &domain.LaunchScreen{}, nil
@@ -215,7 +223,7 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeCategoryService{}, &fakeLaunchScreenService{}, &fakeAISuggestionService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
+	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeCategoryService{}, &fakeLaunchScreenService{}, &fakeHealthService{}, &fakeAISuggestionService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
 
 	tests := []struct {
 		method string
@@ -231,6 +239,8 @@ func TestRegisterAPIRoutesExposesEndpoints(t *testing.T) {
 		{method: http.MethodDelete, path: "/api/v1/item/" + bson.NewObjectID().Hex()},
 		{method: http.MethodGet, path: "/api/v1/categories"},
 		{method: http.MethodGet, path: "/api/v1/app/launch-screen"},
+		{method: http.MethodGet, path: "/health"},
+		{method: http.MethodGet, path: "/ready"},
 		{method: http.MethodPost, path: "/api/v1/pack"},
 		{method: http.MethodGet, path: "/api/v1/pack"},
 		{method: http.MethodGet, path: "/api/v1/pack/" + bson.NewObjectID().Hex()},
@@ -277,7 +287,7 @@ func TestRegisterAPIRoutesDoesNotExposeLegacyPackUpdate(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeCategoryService{}, &fakeLaunchScreenService{}, &fakeAISuggestionService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
+	registerAPIRoutes(router, &fakeItemService{}, &fakePackService{}, &fakeChecklistService{}, &fakeCategoryService{}, &fakeLaunchScreenService{}, &fakeHealthService{}, &fakeAISuggestionService{}, &fakeAuthService{}, &fakeTokenService{}, &fakeObjectURLSigner{})
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/pack/"+bson.NewObjectID().Hex(), bytes.NewBuffer(nil))
 	recorder := httptest.NewRecorder()
